@@ -25,23 +25,54 @@ export default function DashboardPage() {
   const [recentIncidents, setRecentIncidents] = useState<Incident[]>([]);
   const [recentPayments, setRecentPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!agencyId) return;
+
+    let cancelled = false;
+
     (async () => {
-      const [s, incidents, payments] = await Promise.all([
-        getDashboardStats(agencyId),
-        getIncidents(agencyId, { status: "open" }),
-        getPayments(agencyId, { status: "pending" }),
-      ]);
-      setStats(s);
-      setRecentIncidents(incidents.slice(0, 5));
-      setRecentPayments(payments.slice(0, 5));
-      setLoading(false);
+      setLoading(true);
+      setError(null);
+      try {
+        // Ojo: getIncidents(agencyId) y getPayments(agencyId) sin filtros
+        // adicionales reutilizan el mismo índice que ya usan las páginas
+        // de Incidencias y Pagos. Filtramos "abiertas"/"pendientes" aquí
+        // mismo, en el navegador, para no necesitar índices compuestos
+        // nuevos en Firestore.
+        const [s, incidents, payments] = await Promise.all([
+          getDashboardStats(agencyId),
+          getIncidents(agencyId),
+          getPayments(agencyId),
+        ]);
+
+        if (cancelled) return;
+
+        setStats(s);
+        setRecentIncidents(
+          incidents.filter((i) => i.status === "open").slice(0, 5)
+        );
+        setRecentPayments(
+          payments.filter((p) => p.status === "pending").slice(0, 5)
+        );
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Error cargando el dashboard:", err);
+        setError(
+          "No se han podido cargar los datos del dashboard. Revisa la consola del navegador para más detalles."
+        );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [agencyId]);
 
-  if (loading || !stats) {
+  if (loading) {
     return (
       <div className="max-w-[1400px] space-y-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -52,6 +83,20 @@ export default function DashboardPage() {
       </div>
     );
   }
+
+  if (error) {
+    return (
+      <div className="max-w-[1400px]">
+        <EmptyState
+          icon={AlertTriangle}
+          title="No se ha podido cargar el dashboard"
+          description={error}
+        />
+      </div>
+    );
+  }
+
+  if (!stats) return null;
 
   return (
     <div className="max-w-[1400px] space-y-6">
