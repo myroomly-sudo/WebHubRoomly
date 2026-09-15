@@ -63,18 +63,26 @@ export function getInitials(name: string): string {
     .slice(0, 2);
 }
 
-export const INCIDENT_PRIORITY_LABELS: Record<string, string> = {
-  low: "Baja",
-  medium: "Media",
-  high: "Alta",
-  urgent: "Urgente",
+export const INCIDENT_TYPE_LABELS: Record<string, string> = {
+  fontaneria: "Fontanería",
+  electricidad: "Luz / Electricidad",
+  cerrajeria: "Cerrajería",
+  electrodomesticos: "Electrodomésticos",
+  limpieza: "Limpieza",
+  otros: "Otros",
+};
+
+export const INCIDENT_SEVERITY_LABELS: Record<string, string> = {
+  baja: "Baja",
+  media: "Media",
+  alta: "Alta",
 };
 
 export const INCIDENT_STATUS_LABELS: Record<string, string> = {
-  open: "Abierta",
-  in_progress: "En curso",
-  resolved: "Resuelta",
-  closed: "Cerrada",
+  abierta: "Abierta",
+  en_curso: "En curso",
+  resuelta: "Resuelta",
+  cerrada: "Cerrada",
 };
 
 export const PAYMENT_STATUS_LABELS: Record<string, string> = {
@@ -88,3 +96,4 @@ export const ROOM_STATUS_LABELS: Record<string, string> = {
   free: "Libre",
   pending_payment: "Pago pendiente",
 };
+
