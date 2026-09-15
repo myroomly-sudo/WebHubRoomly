@@ -2,33 +2,37 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, Search, Pencil } from "lucide-react";
+import { AlertTriangle, Search, Pencil, ImageIcon } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { getIncidents, updateIncident } from "@/lib/firestore";
-import type { Incident, IncidentStatus } from "@/types";
-import Badge, { incidentStatusBadge, incidentPriorityBadge } from "@/components/ui/Badge";
+import { getIncidents, updateIncident, getProperties } from "@/lib/firestore";
+import type { Incident, IncidentStatus, Property } from "@/types";
+import Badge, { incidentStatusBadge, incidentSeverityBadge } from "@/components/ui/Badge";
 import Modal from "@/components/ui/Modal";
 import EmptyState from "@/components/ui/EmptyState";
-import { formatDate } from "@/lib/utils";
+import { formatDate, INCIDENT_TYPE_LABELS } from "@/lib/utils";
 
 type StatusFilter = "all" | IncidentStatus;
 
 export default function IncidenciasPage() {
   const { agencyId } = useAuth();
   const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [propertyFilter, setPropertyFilter] = useState("all");
   const [editIncident, setEditIncident] = useState<Incident | null>(null);
   const [form, setForm] = useState<{ status: IncidentStatus; agencyNotes: string }>({
-    status: "open",
+    status: "abierta",
     agencyNotes: "",
   });
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const load = async () => {
     if (!agencyId) return;
-    const data = await getIncidents(agencyId);
+    const [data, props] = await Promise.all([getIncidents(agencyId), getProperties(agencyId)]);
     setIncidents(data);
+    setProperties(props);
     setLoading(false);
   };
 
@@ -47,37 +51,40 @@ export default function IncidenciasPage() {
     await updateIncident(editIncident.id, {
       status: form.status,
       agencyNotes: form.agencyNotes,
-      ...(form.status === "resolved" || form.status === "closed"
-        ? { resolvedAt: new Date() as unknown as Incident["resolvedAt"] }
-        : {}),
+      ...(form.status === "resuelta" || form.status === "cerrada"
+        ? { resolvedAt: new Date().toISOString() }
+        : { resolvedAt: undefined }),
     });
     setEditIncident(null);
     await load();
   };
 
   const filtered = incidents.filter((i) => {
+    const typeLabel = INCIDENT_TYPE_LABELS[i.type] ?? i.type;
     const matchSearch =
-      i.title.toLowerCase().includes(search.toLowerCase()) ||
+      typeLabel.toLowerCase().includes(search.toLowerCase()) ||
+      i.description.toLowerCase().includes(search.toLowerCase()) ||
       (i.propertyName ?? "").toLowerCase().includes(search.toLowerCase()) ||
-      (i.tenantName ?? "").toLowerCase().includes(search.toLowerCase());
+      (i.createdByUsername ?? "").toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === "all" || i.status === statusFilter;
-    return matchSearch && matchStatus;
+    const matchProperty = propertyFilter === "all" || i.propertyId === propertyFilter;
+    return matchSearch && matchStatus && matchProperty;
   });
 
   const counts = {
     all: incidents.length,
-    open: incidents.filter((i) => i.status === "open").length,
-    in_progress: incidents.filter((i) => i.status === "in_progress").length,
-    resolved: incidents.filter((i) => i.status === "resolved").length,
-    closed: incidents.filter((i) => i.status === "closed").length,
+    abierta: incidents.filter((i) => i.status === "abierta").length,
+    en_curso: incidents.filter((i) => i.status === "en_curso").length,
+    resuelta: incidents.filter((i) => i.status === "resuelta").length,
+    cerrada: incidents.filter((i) => i.status === "cerrada").length,
   };
 
   const TAB_LABELS: Record<StatusFilter, string> = {
     all: `Todas (${counts.all})`,
-    open: `Abiertas (${counts.open})`,
-    in_progress: `En curso (${counts.in_progress})`,
-    resolved: `Resueltas (${counts.resolved})`,
-    closed: `Cerradas (${counts.closed})`,
+    abierta: `Abiertas (${counts.abierta})`,
+    en_curso: `En curso (${counts.en_curso})`,
+    resuelta: `Resueltas (${counts.resuelta})`,
+    cerrada: `Cerradas (${counts.cerrada})`,
   };
 
   return (
@@ -105,15 +112,27 @@ export default function IncidenciasPage() {
         ))}
       </div>
 
-      <div className="relative w-64">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar incidencia, piso o inquilino…"
-          className="input-field pl-9"
-        />
+      <div className="flex gap-3 flex-wrap">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar incidencia, piso o inquilino…"
+            className="input-field pl-9 w-64"
+          />
+        </div>
+        <select
+          value={propertyFilter}
+          onChange={(e) => setPropertyFilter(e.target.value)}
+          className="select-field w-52"
+        >
+          <option value="all">Todos los pisos</option>
+          {properties.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
       </div>
 
       {loading ? (
@@ -135,7 +154,7 @@ export default function IncidenciasPage() {
               <tr className="border-b border-gray-100 bg-gray-50/50">
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Incidencia</th>
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">Piso</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">Prioridad</th>
+                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">Severidad</th>
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden xl:table-cell">Fecha</th>
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Estado</th>
                 <th className="w-12 px-2" />
@@ -144,18 +163,28 @@ export default function IncidenciasPage() {
             <tbody className="divide-y divide-gray-50">
               {filtered.map((inc) => {
                 const sb = incidentStatusBadge(inc.status);
-                const pb = incidentPriorityBadge(inc.priority);
+                const sevb = incidentSeverityBadge(inc.severity);
                 return (
                   <tr key={inc.id} className="table-row-hover">
                     <td className="px-5 py-4">
-                      <p className="font-semibold text-gray-800">{inc.title}</p>
-                      <p className="text-xs text-gray-400">{inc.tenantName ?? "—"}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-gray-800">
+                          {INCIDENT_TYPE_LABELS[inc.type] ?? inc.type}
+                        </p>
+                        {inc.imageUrls?.length > 0 && (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-gray-400">
+                            <ImageIcon className="w-3 h-3" /> {inc.imageUrls.length}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-400 truncate max-w-xs">{inc.description}</p>
+                      <p className="text-[11px] text-gray-300 mt-0.5">{inc.createdByUsername}</p>
                     </td>
                     <td className="px-5 py-4 hidden lg:table-cell text-gray-600 text-xs">
                       {inc.propertyName ?? "—"}
                     </td>
                     <td className="px-5 py-4 hidden md:table-cell">
-                      <Badge variant={pb.variant}>{pb.label}</Badge>
+                      <Badge variant={sevb.variant}>{sevb.label}</Badge>
                     </td>
                     <td className="px-5 py-4 hidden xl:table-cell text-gray-500 text-xs">
                       {formatDate(inc.createdAt)}
@@ -182,10 +211,38 @@ export default function IncidenciasPage() {
       <Modal open={!!editIncident} onClose={() => setEditIncident(null)} title="Gestionar incidencia" maxWidth="lg">
         {editIncident && (
           <div className="space-y-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant={incidentSeverityBadge(editIncident.severity).variant}>
+                {incidentSeverityBadge(editIncident.severity).label}
+              </Badge>
+              <span className="text-xs text-gray-400">
+                {editIncident.propertyName} · reportada por {editIncident.createdByUsername} el{" "}
+                {formatDate(editIncident.createdAt)}
+              </span>
+            </div>
+
             <div>
-              <p className="font-semibold text-gray-800">{editIncident.title}</p>
+              <p className="font-semibold text-gray-800">
+                {INCIDENT_TYPE_LABELS[editIncident.type] ?? editIncident.type}
+              </p>
               <p className="text-sm text-gray-500 mt-1">{editIncident.description}</p>
             </div>
+
+            {editIncident.imageUrls?.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {editIncident.imageUrls.map((url, i) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={i}
+                    src={url}
+                    alt=""
+                    className="w-16 h-16 rounded-xl object-cover cursor-pointer border border-gray-100"
+                    onClick={() => setLightboxUrl(url)}
+                  />
+                ))}
+              </div>
+            )}
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Estado</label>
               <select
@@ -193,20 +250,25 @@ export default function IncidenciasPage() {
                 value={form.status}
                 onChange={(e) => setForm({ ...form, status: e.target.value as IncidentStatus })}
               >
-                <option value="open">Abierta</option>
-                <option value="in_progress">En curso</option>
-                <option value="resolved">Resuelta</option>
-                <option value="closed">Cerrada</option>
+                <option value="abierta">Abierta</option>
+                <option value="en_curso">En curso</option>
+                <option value="resuelta">Resuelta</option>
+                <option value="cerrada">Cerrada</option>
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Notas internas de la agencia</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Nota de la agencia
+              </label>
               <textarea
                 className="input-field min-h-[90px]"
                 value={form.agencyNotes}
                 onChange={(e) => setForm({ ...form, agencyNotes: e.target.value })}
-                placeholder="Notas visibles solo en el Hub, no para el inquilino…"
+                placeholder="El inquilino verá esta nota en la app…"
               />
+              <p className="text-xs text-gray-400 mt-1">
+                Esta nota es visible para el inquilino en su app.
+              </p>
             </div>
             <div className="flex justify-end gap-3 pt-2">
               <button onClick={() => setEditIncident(null)} className="btn-secondary">Cancelar</button>
@@ -215,6 +277,23 @@ export default function IncidenciasPage() {
           </div>
         )}
       </Modal>
+
+      {/* Visor de foto a pantalla completa */}
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 z-[300] bg-black/90 flex items-center justify-center p-6"
+          onClick={() => setLightboxUrl(null)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightboxUrl}
+            alt=""
+            className="max-w-full max-h-full object-contain rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }
+
