@@ -2,6 +2,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import Link from "next/link";
 import { Bell, Search } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { getInitials } from "@/lib/utils";
@@ -13,6 +14,7 @@ const ROUTE_TITLES: Record<string, string> = {
   "/incidencias": "Incidencias",
   "/usuarios": "Usuarios",
   "/pagos": "Pagos",
+  "/perfil": "Mi perfil",
 };
 
 export default function Header() {
@@ -45,9 +47,13 @@ export default function Header() {
         </button>
 
         {/* Avatar */}
-        <div className="w-8 h-8 rounded-full bg-roomly-navy text-white flex items-center justify-center text-xs font-bold">
+        <Link
+          href="/perfil"
+          className="w-8 h-8 rounded-full bg-roomly-navy text-white flex items-center justify-center text-xs font-bold hover:opacity-90 transition-opacity"
+          title="Mi perfil"
+        >
           {initials}
-        </div>
+        </Link>
       </div>
     </header>
   );
