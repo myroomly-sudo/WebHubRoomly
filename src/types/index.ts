@@ -2,8 +2,15 @@
 
 export type PropertyStatus = "active" | "inactive";
 export type RoomStatus = "occupied" | "free" | "pending_payment";
-export type IncidentStatus = "open" | "in_progress" | "resolved" | "closed";
-export type IncidentPriority = "low" | "medium" | "high" | "urgent";
+export type IncidentType =
+  | "fontaneria"
+  | "electricidad"
+  | "cerrajeria"
+  | "electrodomesticos"
+  | "limpieza"
+  | "otros";
+export type IncidentSeverity = "baja" | "media" | "alta";
+export type IncidentStatus = "abierta" | "en_curso" | "resuelta" | "cerrada";
 export type PaymentStatus = "paid" | "pending" | "overdue";
 
 export interface Agency {
@@ -67,23 +74,23 @@ export interface Tenant {
   isActive: boolean;
 }
 
+// Esquema real: coincide con el documento que escribe la app móvil
+// (src/lib/incidentsService.ts). No tiene agencyId ni roomId: el Hub
+// resuelve la agencia y el nombre del piso a través de propertyId.
 export interface Incident {
   id: string;
   propertyId: string;
-  propertyName?: string;
-  roomId?: string;
-  tenantId: string;
-  tenantName?: string;
-  title: string;
+  propertyName?: string; // enriquecido por el Hub, no vive en Firestore
+  type: IncidentType;
+  severity: IncidentSeverity;
   description: string;
+  imageUrls: string[];
   status: IncidentStatus;
-  priority: IncidentPriority;
-  category: string;
-  photoUrl?: string;
-  agencyNotes?: string;
-  createdAt: Date;
-  updatedAt: Date;
-  resolvedAt?: Date;
+  createdBy: string; // userId del inquilino
+  createdByUsername: string;
+  createdAt: string; // ISO string (no Timestamp de Firestore)
+  resolvedAt?: string; // ISO string — lo pone el Hub al resolver/cerrar
+  agencyNotes?: string; // notas internas, visibles también en la app
 }
 
 export interface Payment {
@@ -115,3 +122,4 @@ export interface DashboardStats {
   monthlyRevenue: number;
   occupancyRate: number;
 }
+
