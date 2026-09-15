@@ -7,6 +7,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  setDoc,
   query,
   where,
   orderBy,
@@ -16,6 +17,7 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase";
 import type {
+  Agency,
   Property,
   Room,
   Tenant,
@@ -23,6 +25,28 @@ import type {
   Payment,
   DashboardStats,
 } from "@/types";
+
+// ─── AGENCY (perfil / ajustes) ─────────────────────────────────────────────
+
+export async function getAgency(agencyId: string): Promise<Agency | null> {
+  const snap = await getDoc(doc(db, "agencies", agencyId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as Agency;
+}
+
+// setDoc con merge:true en vez de updateDoc: si el documento de la agencia
+// todavía no existe (no hay flujo de alta de agencias), lo crea; si ya
+// existe, solo actualiza los campos indicados.
+export async function updateAgency(
+  agencyId: string,
+  data: Partial<Agency>
+): Promise<void> {
+  await setDoc(
+    doc(db, "agencies", agencyId),
+    { ...data, updatedAt: Timestamp.now() },
+    { merge: true }
+  );
+}
 
 // ─── PROPERTIES ────────────────────────────────────────────────────────────
 
