@@ -167,18 +167,38 @@ export default function IncidenciasPage() {
                 return (
                   <tr key={inc.id} className="table-row-hover">
                     <td className="px-5 py-4">
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold text-gray-800">
-                          {INCIDENT_TYPE_LABELS[inc.type] ?? inc.type}
-                        </p>
-                        {inc.imageUrls?.length > 0 && (
-                          <span className="inline-flex items-center gap-1 text-[11px] text-gray-400">
-                            <ImageIcon className="w-3 h-3" /> {inc.imageUrls.length}
-                          </span>
+                      <div className="flex items-start gap-3">
+                        {inc.imageUrls?.length > 0 ? (
+                          <button
+                            onClick={() => setLightboxUrl(inc.imageUrls[0])}
+                            className="relative w-12 h-12 rounded-lg overflow-hidden border border-gray-100 flex-shrink-0"
+                            title="Ver foto"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={inc.imageUrls[0]}
+                              alt=""
+                              className="w-full h-full object-cover"
+                            />
+                            {inc.imageUrls.length > 1 && (
+                              <span className="absolute bottom-0 right-0 bg-black/70 text-white text-[10px] font-semibold px-1 rounded-tl-md">
+                                +{inc.imageUrls.length - 1}
+                              </span>
+                            )}
+                          </button>
+                        ) : (
+                          <div className="w-12 h-12 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0">
+                            <ImageIcon className="w-4 h-4 text-gray-300" />
+                          </div>
                         )}
+                        <div className="min-w-0">
+                          <p className="font-semibold text-gray-800">
+                            {INCIDENT_TYPE_LABELS[inc.type] ?? inc.type}
+                          </p>
+                          <p className="text-xs text-gray-400 truncate max-w-xs">{inc.description}</p>
+                          <p className="text-[11px] text-gray-300 mt-0.5">{inc.createdByUsername}</p>
+                        </div>
                       </div>
-                      <p className="text-xs text-gray-400 truncate max-w-xs">{inc.description}</p>
-                      <p className="text-[11px] text-gray-300 mt-0.5">{inc.createdByUsername}</p>
                     </td>
                     <td className="px-5 py-4 hidden lg:table-cell text-gray-600 text-xs">
                       {inc.propertyName ?? "—"}
@@ -296,4 +316,3 @@ export default function IncidenciasPage() {
     </div>
   );
 }
-
