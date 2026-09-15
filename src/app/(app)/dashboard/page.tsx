@@ -16,7 +16,7 @@ import type { DashboardStats, Incident, Payment } from "@/types";
 import KpiCard from "@/components/ui/KpiCard";
 import Badge, { incidentStatusBadge, paymentStatusBadge } from "@/components/ui/Badge";
 import EmptyState from "@/components/ui/EmptyState";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, INCIDENT_TYPE_LABELS } from "@/lib/utils";
 import Link from "next/link";
 
 export default function DashboardPage() {
@@ -51,7 +51,7 @@ export default function DashboardPage() {
 
         setStats(s);
         setRecentIncidents(
-          incidents.filter((i) => i.status === "open").slice(0, 5)
+          incidents.filter((i) => i.status === "abierta").slice(0, 5)
         );
         setRecentPayments(
           payments.filter((p) => p.status === "pending").slice(0, 5)
@@ -191,7 +191,9 @@ export default function DashboardPage() {
                 return (
                   <div key={inc.id} className="px-5 py-3.5 flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-800 truncate">{inc.title}</p>
+                      <p className="text-sm font-medium text-gray-800 truncate">
+                        {INCIDENT_TYPE_LABELS[inc.type] ?? inc.type}
+                      </p>
                       <p className="text-xs text-gray-400 truncate">
                         {inc.propertyName ?? "—"} · {formatDate(inc.createdAt)}
                       </p>
@@ -246,3 +248,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+
