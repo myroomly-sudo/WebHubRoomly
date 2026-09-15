@@ -46,22 +46,21 @@ export default function Badge({ variant, children, dot, className }: BadgeProps)
 // Convenience helpers
 export function incidentStatusBadge(status: string) {
   const map: Record<string, { variant: BadgeVariant; label: string }> = {
-    open: { variant: "red", label: "Abierta" },
-    in_progress: { variant: "yellow", label: "En curso" },
-    resolved: { variant: "green", label: "Resuelta" },
-    closed: { variant: "gray", label: "Cerrada" },
+    abierta: { variant: "red", label: "Abierta" },
+    en_curso: { variant: "yellow", label: "En curso" },
+    resuelta: { variant: "green", label: "Resuelta" },
+    cerrada: { variant: "gray", label: "Cerrada" },
   };
   return map[status] ?? { variant: "gray", label: status };
 }
 
-export function incidentPriorityBadge(priority: string) {
+export function incidentSeverityBadge(severity: string) {
   const map: Record<string, { variant: BadgeVariant; label: string }> = {
-    low: { variant: "gray", label: "Baja" },
-    medium: { variant: "blue", label: "Media" },
-    high: { variant: "orange", label: "Alta" },
-    urgent: { variant: "red", label: "Urgente" },
+    baja: { variant: "gray", label: "Baja" },
+    media: { variant: "blue", label: "Media" },
+    alta: { variant: "red", label: "Alta" },
   };
-  return map[priority] ?? { variant: "gray", label: priority };
+  return map[severity] ?? { variant: "gray", label: severity };
 }
 
 export function paymentStatusBadge(status: string) {
@@ -89,3 +88,4 @@ export function propertyStatusBadge(status: string) {
   };
   return map[status] ?? { variant: "gray", label: status };
 }
+
