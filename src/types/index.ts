@@ -11,7 +11,16 @@ export interface Agency {
   name: string;
   email: string;
   phone?: string;
+  contactName?: string;
+  address?: string;
+  city?: string;
+  postalCode?: string;
+  taxId?: string; // CIF/NIF
+  bankAccountHolder?: string;
+  bankIban?: string;
+  bankName?: string;
   createdAt: Date;
+  updatedAt?: Date;
 }
 
 export interface Property {
