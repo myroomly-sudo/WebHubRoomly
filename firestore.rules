@@ -1,11 +1,7 @@
-// firestore.rules
-// Reglas de seguridad para Roomly Hub
-
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Solo usuarios autenticados pueden leer/escribir sus propios datos de agencia
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -14,33 +10,67 @@ service cloud.firestore {
       return request.auth.uid == agencyId;
     }
 
-    // Properties: la agencia solo ve sus propias propiedades
+    // Agencies (Hub): cada agencia solo lee/escribe su propio documento de perfil
+    match /agencies/{agencyId} {
+      allow read, write: if isAuthenticated() && isAgencyOwner(agencyId);
+    }
+
+    // Viviendas: lectura pública (necesaria para verificar el código de
+    // vivienda ANTES de iniciar sesión en la app móvil). La escritura
+    // solo la puede hacer la agencia propietaria del piso desde el Hub.
     match /properties/{propertyId} {
-      allow read, write: if isAuthenticated() && isAgencyOwner(resource.data.agencyId);
+      allow read: if true;
+      allow update, delete: if isAuthenticated() && isAgencyOwner(resource.data.agencyId);
       allow create: if isAuthenticated() && isAgencyOwner(request.resource.data.agencyId);
     }
 
-    // Rooms: accesibles si la agencia es propietaria del piso
+    // Usuarios de la app móvil (convivientes): cada uno lee/escribe el
+    // suyo; lectura general permitida para ver a los compañeros de piso.
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+      allow create: if isAuthenticated();
+    }
+
+    // Rooms (Hub): habitaciones de cada piso
     match /rooms/{roomId} {
       allow read, write: if isAuthenticated();
     }
 
-    // Tenants: accesibles para agencias autenticadas
+    // Tenants (Hub) — pendiente de decidir si se fusiona con "users"
     match /tenants/{tenantId} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated();
     }
 
-    // Incidents: la agencia gestiona las de sus pisos
+    // Incidents: el documento NO tiene agencyId, solo propertyId, así
+    // que para saber si la agencia es dueña miramos su piso (properties)
+    // con get(). Cualquier usuario autenticado puede leer (inquilinos
+    // del piso incluidos) y crear. Solo puede editar/borrar quien la
+    // creó (el propio inquilino, ej. para borrarla) o la agencia dueña
+    // del piso (para cambiar estado/notas desde el Hub).
     match /incidents/{incidentId} {
-      allow read, write: if isAuthenticated() && isAgencyOwner(resource.data.agencyId);
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && (
+        resource.data.createdBy == request.auth.uid ||
+        get(/databases/$(database)/documents/properties/$(resource.data.propertyId)).data.agencyId == request.auth.uid
+      );
     }
 
-    // Payments: la agencia gestiona los de sus pisos
+    // Payments (Hub) — módulo propio del Hub, sin relación aún con la app
     match /payments/{paymentId} {
       allow read, write: if isAuthenticated() && isAgencyOwner(resource.data.agencyId);
       allow create: if isAuthenticated();
     }
+
+    // Todo lo demás (módulos del MVP aún no implementados: reservas,
+    // espacios comunes, gastos, etc.): cualquier usuario autenticado
+    // puede leer/escribir. Conviene ir sustituyendo esto por reglas
+    // específicas a medida que se construya cada módulo.
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
   }
 }
+
