@@ -8,6 +8,7 @@ import {
   updateDoc,
   deleteDoc,
   setDoc,
+  deleteField,
   query,
   where,
   orderBy,
@@ -26,6 +27,7 @@ import type {
   Payment,
   DashboardStats,
 } from "@/types";
+import { INCIDENT_TYPE_LABELS } from "./utils";
 
 // ─── AGENCY (perfil / ajustes) ─────────────────────────────────────────────
 
@@ -223,6 +225,52 @@ export async function updateIncident(
   await updateDoc(doc(db, "incidents", id), data);
 }
 
+// Cambia el estado de una incidencia y sus notas. IMPORTANTE: nunca se
+// pasa `resolvedAt: undefined` a updateDoc — el SDK de Firestore lanza un
+// error en tiempo de ejecución si un campo vale `undefined` ("se buguea").
+// Cuando el nuevo estado no es resuelta/cerrada, se usa deleteField()
+// para borrar limpiamente el campo si ya existía (p. ej. al reabrir una
+// incidencia que se había marcado como resuelta por error).
+export async function setIncidentStatus(
+  id: string,
+  status: IncidentStatus,
+  agencyNotes: string
+): Promise<void> {
+  const isDone = status === "resuelta" || status === "cerrada";
+  await updateDoc(doc(db, "incidents", id), {
+    status,
+    agencyNotes,
+    resolvedAt: isDone ? new Date().toISOString() : deleteField(),
+  });
+}
+
+// Notificación real que verá el inquilino en la app cuando la agencia
+// pone su incidencia "en curso" o la marca como "resuelta"/"cerrada".
+// Incluye la nota que haya dejado la agencia, si hay alguna.
+export async function notifyTenantIncidentUpdate(
+  incident: Incident,
+  newStatus: IncidentStatus,
+  agencyNotes: string
+): Promise<void> {
+  const typeLabel = INCIDENT_TYPE_LABELS[incident.type] ?? incident.type;
+  const baseMessage =
+    newStatus === "en_curso"
+      ? `La agencia está tratando tu incidencia de "${typeLabel}".`
+      : `Tu incidencia de "${typeLabel}" ha sido marcada como resuelta.`;
+  const message = agencyNotes.trim()
+    ? `${baseMessage} Nota de la agencia: ${agencyNotes.trim()}`
+    : baseMessage;
+
+  await addDoc(collection(db, "notifications"), {
+    type: newStatus === "en_curso" ? "incident_in_progress" : "incident_resolved",
+    message,
+    userId: incident.createdBy,
+    propertyId: incident.propertyId,
+    createdAt: Timestamp.now(),
+    read: false,
+  });
+}
+
 // ─── PAYMENTS ──────────────────────────────────────────────────────────────
 
 export async function getPayments(
@@ -315,3 +363,4 @@ export function subscribeToIncidents(
     callback(incidents);
   });
 }
+
