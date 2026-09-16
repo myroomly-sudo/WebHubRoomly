@@ -196,9 +196,16 @@ export async function getIncidents(
     });
   }
 
+  // Solo se muestran incidencias con un estado válido de los 4 que
+  // gestiona el Hub. Cualquier otra cosa (datos de prueba creados a
+  // mano en Firestore, valores antiguos, etc.) se ignora: así el Hub
+  // solo muestra lo que realmente puede haber creado la app móvil.
+  const VALID_STATUSES: IncidentStatus[] = ["abierta", "en_curso", "resuelta", "cerrada"];
+  const validOnly = incidents.filter((i) => VALID_STATUSES.includes(i.status));
+
   const filtered = filters?.status
-    ? incidents.filter((i) => i.status === filters.status)
-    : incidents;
+    ? validOnly.filter((i) => i.status === filters.status)
+    : validOnly;
 
   // createdAt es un ISO string, no un Timestamp de Firestore: ordenamos
   // en el cliente en vez de con orderBy() en la query.
@@ -308,4 +315,3 @@ export function subscribeToIncidents(
     callback(incidents);
   });
 }
-
