@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Search, Pencil, ImageIcon } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { getIncidents, updateIncident, getProperties } from "@/lib/firestore";
+import { getIncidents, getProperties, setIncidentStatus, notifyTenantIncidentUpdate } from "@/lib/firestore";
 import type { Incident, IncidentStatus, Property } from "@/types";
 import Badge, { incidentStatusBadge, incidentSeverityBadge } from "@/components/ui/Badge";
 import Modal from "@/components/ui/Modal";
@@ -48,13 +48,21 @@ export default function IncidenciasPage() {
 
   const handleSave = async () => {
     if (!editIncident) return;
-    await updateIncident(editIncident.id, {
-      status: form.status,
-      agencyNotes: form.agencyNotes,
-      ...(form.status === "resuelta" || form.status === "cerrada"
-        ? { resolvedAt: new Date().toISOString() }
-        : { resolvedAt: undefined }),
-    });
+    const previousStatus = editIncident.status;
+
+    await setIncidentStatus(editIncident.id, form.status, form.agencyNotes);
+
+    // Solo avisamos al inquilino si el estado realmente cambió a "en
+    // curso" o a "resuelta"/"cerrada" (no si solo se editó la nota
+    // dejando el mismo estado, ni si ya estaba en ese estado antes).
+    const statusChanged = form.status !== previousStatus;
+    const shouldNotify =
+      statusChanged &&
+      (form.status === "en_curso" || form.status === "resuelta" || form.status === "cerrada");
+    if (shouldNotify) {
+      await notifyTenantIncidentUpdate(editIncident, form.status, form.agencyNotes);
+    }
+
     setEditIncident(null);
     await load();
   };
@@ -287,7 +295,9 @@ export default function IncidenciasPage() {
                 placeholder="El inquilino verá esta nota en la app…"
               />
               <p className="text-xs text-gray-400 mt-1">
-                Esta nota es visible para el inquilino en su app.
+                Esta nota es visible para el inquilino en su app. Si cambias el
+                estado a "En curso" o "Resuelta"/"Cerrada", el inquilino recibe
+                una notificación con esta nota incluida.
               </p>
             </div>
             <div className="flex justify-end gap-3 pt-2">
@@ -316,3 +326,4 @@ export default function IncidenciasPage() {
     </div>
   );
 }
+
