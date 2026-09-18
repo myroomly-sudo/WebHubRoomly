@@ -1,11 +1,21 @@
-// src/components/layout/Header.tsx
 "use client";
 
-import { usePathname } from "next/navigation";
-import Link from "next/link";
-import { Bell, Search } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Bell, X, Users, AlertTriangle, CheckCheck } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { getInitials } from "@/lib/utils";
+import { useEffect, useState, useRef } from "react";
+import {
+  collection,
+  query,
+  where,
+  onSnapshot,
+  doc,
+  updateDoc,
+  orderBy,
+  Timestamp,
+} from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
 const ROUTE_TITLES: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -14,12 +24,42 @@ const ROUTE_TITLES: Record<string, string> = {
   "/incidencias": "Incidencias",
   "/usuarios": "Usuarios",
   "/pagos": "Pagos",
-  "/perfil": "Mi perfil",
 };
+
+interface HubNotification {
+  id: string;
+  type: "new_user" | "new_incident" | string;
+  message: string;
+  read: boolean;
+  propertyId?: string;
+  propertyName?: string;
+  targetId?: string; // userId or incidentId
+  createdAt: Timestamp | Date | string;
+  agencyId: string;
+}
+
+function timeAgo(date: HubNotification["createdAt"]): string {
+  let d: Date;
+  if (!date) return "";
+  if (typeof date === "string") d = new Date(date);
+  else if (date instanceof Date) d = date;
+  else d = (date as Timestamp).toDate();
+
+  const diff = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (diff < 60) return "ahora";
+  if (diff < 3600) return `hace ${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `hace ${Math.floor(diff / 3600)}h`;
+  return `hace ${Math.floor(diff / 86400)}d`;
+}
 
 export default function Header() {
   const pathname = usePathname();
+  const router = useRouter();
   const { user } = useAuth();
+
+  const [notifications, setNotifications] = useState<HubNotification[]>([]);
+  const [open, setOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const title = Object.entries(ROUTE_TITLES).find(([key]) =>
     pathname === key || (key !== "/dashboard" && pathname.startsWith(key))
@@ -27,33 +67,165 @@ export default function Header() {
 
   const email = user?.email ?? "";
   const initials = getInitials(email.split("@")[0]);
+  const agencyId = user?.uid;
+
+  // Real-time listener for unread hub notifications
+  useEffect(() => {
+    if (!agencyId) return;
+
+    const q = query(
+      collection(db, "hubNotifications"),
+      where("agencyId", "==", agencyId),
+      orderBy("createdAt", "desc")
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      setNotifications(
+        snap.docs.map((d) => ({ id: d.id, ...d.data() } as HubNotification))
+      );
+    });
+
+    return unsub;
+  }, [agencyId]);
+
+  // Close panel when clicking outside
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  const markAsRead = async (notif: HubNotification) => {
+    // Mark as read in Firestore
+    await updateDoc(doc(db, "hubNotifications", notif.id), { read: true });
+
+    // Navigate to relevant section
+    if (notif.type === "new_user") {
+      router.push("/usuarios");
+    } else if (notif.type === "new_incident") {
+      router.push("/incidencias");
+    }
+
+    setOpen(false);
+  };
+
+  const markAllRead = async () => {
+    const unread = notifications.filter((n) => !n.read);
+    await Promise.all(
+      unread.map((n) => updateDoc(doc(db, "hubNotifications", n.id), { read: true }))
+    );
+  };
+
+  const getIcon = (type: string) => {
+    if (type === "new_user") return <Users className="w-4 h-4 text-sky-500" />;
+    if (type === "new_incident") return <AlertTriangle className="w-4 h-4 text-orange-500" />;
+    return <Bell className="w-4 h-4 text-gray-400" />;
+  };
+
+  const getIconBg = (type: string) => {
+    if (type === "new_user") return "bg-sky-50";
+    if (type === "new_incident") return "bg-orange-50";
+    return "bg-gray-100";
+  };
 
   return (
     <header className="h-14 border-b border-gray-200 bg-white px-6 flex items-center justify-between flex-shrink-0">
       <h1 className="text-base font-semibold text-roomly-charcoal">{title}</h1>
 
       <div className="flex items-center gap-3">
-        {/* Search hint */}
-        <button className="hidden lg:flex items-center gap-2 px-3 py-1.5 text-sm text-gray-400 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
-          <Search className="w-3.5 h-3.5" />
-          <span>Buscar…</span>
-          <kbd className="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded ml-1 font-mono">⌘K</kbd>
-        </button>
-
         {/* Notifications */}
-        <button className="relative p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
-          <Bell className="w-4 h-4" />
-          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-500 rounded-full" />
-        </button>
+        <div className="relative" ref={panelRef}>
+          <button
+            onClick={() => setOpen(!open)}
+            className="relative p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <Bell className="w-4 h-4" />
+            {unreadCount > 0 && (
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
+            )}
+          </button>
+
+          {/* Notifications panel */}
+          {open && (
+            <div className="absolute right-0 top-11 w-80 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 overflow-hidden">
+              {/* Panel header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-gray-800">Notificaciones</span>
+                  {unreadCount > 0 && (
+                    <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded-full font-semibold">
+                      {unreadCount}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={markAllRead}
+                      className="text-xs text-roomly-navy font-medium hover:underline flex items-center gap-1 mr-2"
+                    >
+                      <CheckCheck className="w-3 h-3" />
+                      Marcar todas
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setOpen(false)}
+                    className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* List */}
+              <div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
+                {notifications.length === 0 ? (
+                  <div className="px-4 py-8 text-center">
+                    <Bell className="w-8 h-8 mx-auto mb-2 text-gray-200" />
+                    <p className="text-sm text-gray-400">Sin notificaciones</p>
+                  </div>
+                ) : (
+                  notifications.map((notif) => (
+                    <button
+                      key={notif.id}
+                      onClick={() => markAsRead(notif)}
+                      className={`w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors ${
+                        !notif.read ? "bg-blue-50/40" : ""
+                      }`}
+                    >
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${getIconBg(notif.type)}`}>
+                        {getIcon(notif.type)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm leading-snug ${!notif.read ? "font-semibold text-gray-800" : "text-gray-600"}`}>
+                          {notif.message}
+                        </p>
+                        {notif.propertyName && (
+                          <p className="text-xs text-gray-400 mt-0.5 truncate">{notif.propertyName}</p>
+                        )}
+                        <p className="text-xs text-gray-400 mt-0.5">{timeAgo(notif.createdAt)}</p>
+                      </div>
+                      {!notif.read && (
+                        <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-1.5" />
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Avatar */}
-        <Link
-          href="/perfil"
-          className="w-8 h-8 rounded-full bg-roomly-navy text-white flex items-center justify-center text-xs font-bold hover:opacity-90 transition-opacity"
-          title="Mi perfil"
-        >
+        <div className="w-8 h-8 rounded-full bg-roomly-navy text-white flex items-center justify-center text-xs font-bold">
           {initials}
-        </Link>
+        </div>
       </div>
     </header>
   );
