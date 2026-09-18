@@ -69,24 +69,41 @@ export default function Header() {
   const initials = getInitials(email.split("@")[0]);
   const agencyId = user?.uid;
 
-  // Real-time listener for unread hub notifications
+  // Real-time listener — only starts once Firebase Auth confirms the session
   useEffect(() => {
-    if (!agencyId) return;
+    if (!agencyId || !user) return;
 
-    const q = query(
-      collection(db, "hubNotifications"),
-      where("agencyId", "==", agencyId),
-      orderBy("createdAt", "desc")
-    );
+    let unsub: (() => void) | undefined;
 
-    const unsub = onSnapshot(q, (snap) => {
-      setNotifications(
-        snap.docs.map((d) => ({ id: d.id, ...d.data() } as HubNotification))
-      );
-    });
+    // Small delay to ensure Auth token is ready before opening a persistent connection
+    const timer = setTimeout(() => {
+      try {
+        const q = query(
+          collection(db, "hubNotifications"),
+          where("agencyId", "==", agencyId),
+          orderBy("createdAt", "desc")
+        );
+        unsub = onSnapshot(
+          q,
+          (snap) => {
+            setNotifications(
+              snap.docs.map((d) => ({ id: d.id, ...d.data() } as HubNotification))
+            );
+          },
+          (error) => {
+            console.log("Notifications listener error:", error.code);
+          }
+        );
+      } catch (e) {
+        console.log("Notifications setup error:", e);
+      }
+    }, 1500);
 
-    return unsub;
-  }, [agencyId]);
+    return () => {
+      clearTimeout(timer);
+      unsub?.();
+    };
+  }, [agencyId, user]);
 
   // Close panel when clicking outside
   useEffect(() => {
