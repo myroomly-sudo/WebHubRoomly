@@ -1,32 +1,79 @@
-// src/app/(app)/usuarios/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, Search, Filter, MoreHorizontal, UserX, UserCheck } from "lucide-react";
+import { Users, Search, Building2, ChevronDown, Mail, Calendar } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { getAllTenants, getProperties, updateTenant } from "@/lib/firestore";
-import type { Tenant, Property } from "@/types";
-import Badge from "@/components/ui/Badge";
-import EmptyState from "@/components/ui/EmptyState";
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+} from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { formatDate, getInitials } from "@/lib/utils";
 
-type StatusFilter = "all" | "active" | "inactive";
+interface FirestoreUser {
+  id: string;
+  email: string;
+  username: string;
+  propertyId: string;
+  createdAt: string | Date | { toDate: () => Date };
+  avatarUrl?: string;
+}
+
+interface PropertyBasic {
+  id: string;
+  name: string;
+  address?: string;
+  propertyCode: string;
+  maxUsers: number;
+}
 
 export default function UsuariosPage() {
   const { agencyId } = useAuth();
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [properties, setProperties] = useState<Property[]>([]);
+  const [properties, setProperties] = useState<PropertyBasic[]>([]);
+  const [usersByProperty, setUsersByProperty] = useState<Record<string, FirestoreUser[]>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [propertyFilter, setPropertyFilter] = useState("all");
-  const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [expandedProps, setExpandedProps] = useState<Set<string>>(new Set());
 
   const load = async () => {
     if (!agencyId) return;
-    const [t, p] = await Promise.all([getAllTenants(agencyId), getProperties(agencyId)]);
-    setTenants(t);
-    setProperties(p);
+
+    // 1. Fetch properties for this agency
+    const propsSnap = await getDocs(
+      query(collection(db, "properties"), where("agencyId", "==", agencyId))
+    );
+    const props: PropertyBasic[] = propsSnap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as Omit<PropertyBasic, "id">),
+    }));
+    setProperties(props);
+
+    // 2. Fetch users for each property from the "users" collection
+    const map: Record<string, FirestoreUser[]> = {};
+    await Promise.all(
+      props.map(async (p) => {
+        try {
+          const usersSnap = await getDocs(
+            query(
+              collection(db, "users"),
+              where("propertyId", "==", p.id)
+            )
+          );
+          map[p.id] = usersSnap.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as Omit<FirestoreUser, "id">),
+          }));
+        } catch {
+          map[p.id] = [];
+        }
+      })
+    );
+
+    setUsersByProperty(map);
+    setExpandedProps(new Set(props.map((p) => p.id)));
     setLoading(false);
   };
 
@@ -35,62 +82,47 @@ export default function UsuariosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agencyId]);
 
-  const propertyName = (id: string) => properties.find((p) => p.id === id)?.name ?? "—";
-
-  const toggleActive = async (tenant: Tenant) => {
-    await updateTenant(tenant.id, { isActive: !tenant.isActive });
-    setMenuOpen(null);
-    await load();
+  const toggleExpand = (id: string) => {
+    setExpandedProps((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   };
 
-  const filtered = tenants.filter((t) => {
-    const matchSearch =
-      t.username.toLowerCase().includes(search.toLowerCase()) ||
-      t.email.toLowerCase().includes(search.toLowerCase());
-    const matchStatus =
-      statusFilter === "all" ||
-      (statusFilter === "active" ? t.isActive : !t.isActive);
-    const matchProperty = propertyFilter === "all" || t.propertyId === propertyFilter;
-    return matchSearch && matchStatus && matchProperty;
-  });
-
-  const counts = {
-    all: tenants.length,
-    active: tenants.filter((t) => t.isActive).length,
-    inactive: tenants.filter((t) => !t.isActive).length,
+  const formatUserDate = (date: FirestoreUser["createdAt"]): string => {
+    if (!date) return "—";
+    if (typeof date === "string") return formatDate(new Date(date));
+    if (typeof date === "object" && "toDate" in date) return formatDate(date.toDate());
+    return formatDate(date as Date);
   };
 
-  const TAB_LABELS: Record<StatusFilter, string> = {
-    all: `Todos (${counts.all})`,
-    active: `Activos (${counts.active})`,
-    inactive: `Inactivos (${counts.inactive})`,
-  };
+  const totalUsers = Object.values(usersByProperty).flat().length;
+
+  const filteredProperties = properties.filter(
+    (p) => propertyFilter === "all" || p.id === propertyFilter
+  );
+
+  const filterUsers = (users: FirestoreUser[]) =>
+    users.filter(
+      (u) =>
+        u.username?.toLowerCase().includes(search.toLowerCase()) ||
+        u.email?.toLowerCase().includes(search.toLowerCase())
+    );
 
   return (
     <div className="max-w-[1400px] space-y-6">
-      <div className="page-header">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="section-title">Usuarios</h2>
-          <p className="text-sm text-gray-400 mt-0.5">{tenants.length} inquilinos registrados</p>
+          <h2 className="text-xl font-bold text-roomly-charcoal">Usuarios</h2>
+          <p className="text-sm text-gray-400 mt-0.5">
+            {totalUsers} inquilinos registrados en {properties.length} pisos
+          </p>
         </div>
       </div>
 
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {(Object.keys(TAB_LABELS) as StatusFilter[]).map((key) => (
-          <button
-            key={key}
-            onClick={() => setStatusFilter(key)}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              statusFilter === key
-                ? "bg-white text-roomly-navy shadow-sm"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {TAB_LABELS[key]}
-          </button>
-        ))}
-      </div>
-
+      {/* Filters */}
       <div className="flex gap-3 flex-wrap">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -98,16 +130,20 @@ export default function UsuariosPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar usuario o email…"
-            className="input-field pl-9 w-64"
+            placeholder="Buscar por nombre o email…"
+            className="w-full border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm pl-9
+                       focus:outline-none focus:ring-2 focus:ring-roomly-navy/20 focus:border-roomly-navy
+                       transition-all bg-white w-64"
           />
         </div>
         <div className="relative">
-          <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <select
             value={propertyFilter}
             onChange={(e) => setPropertyFilter(e.target.value)}
-            className="select-field pl-9 w-52"
+            className="border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm pl-9 pr-8
+                       focus:outline-none focus:ring-2 focus:ring-roomly-navy/20 focus:border-roomly-navy
+                       transition-all bg-white appearance-none cursor-pointer w-52"
           >
             <option value="all">Todos los pisos</option>
             {properties.map((p) => (
@@ -117,89 +153,137 @@ export default function UsuariosPage() {
         </div>
       </div>
 
+      {/* Content */}
       {loading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-16 bg-gray-100 rounded-xl animate-pulse" />
+        <div className="space-y-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="bg-gray-100 rounded-2xl h-32 animate-pulse" />
           ))}
         </div>
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={Users}
-          title="Sin usuarios"
-          description="No hay inquilinos que coincidan con los filtros. Los usuarios se dan de alta desde la app móvil."
-        />
+      ) : filteredProperties.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="w-14 h-14 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
+            <Users className="w-7 h-7 text-gray-400" />
+          </div>
+          <h3 className="text-base font-semibold text-gray-700 mb-1">Sin pisos</h3>
+          <p className="text-sm text-gray-400">Crea un piso para empezar a ver inquilinos.</p>
+        </div>
       ) : (
-        <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50/50">
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Usuario</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">Piso</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">Se unió</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Estado</th>
-                <th className="w-12 px-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {filtered.map((t) => (
-                <tr key={t.id} className="table-row-hover">
-                  <td className="px-5 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-roomly-navy text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
-                        {getInitials(t.username)}
+        <div className="space-y-4">
+          {filteredProperties.map((prop) => {
+            const users = filterUsers(usersByProperty[prop.id] ?? []);
+            const isExpanded = expandedProps.has(prop.id);
+            const maxUsers = prop.maxUsers ?? 10;
+
+            return (
+              <div
+                key={prop.id}
+                className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
+              >
+                {/* Property header */}
+                <button
+                  onClick={() => toggleExpand(prop.id)}
+                  className="w-full flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition-colors text-left"
+                >
+                  <div className="w-9 h-9 bg-sky-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <Building2 className="w-4 h-4 text-sky-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-gray-800">{prop.name}</p>
+                    <p className="text-xs text-gray-400">
+                      {prop.address ?? "Sin dirección"} · {users.length}/{maxUsers} inquilinos
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-gray-400 hidden sm:block">
+                      Código:{" "}
+                      <code className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
+                        {prop.propertyCode}
+                      </code>
+                    </span>
+                    {/* Occupancy bar */}
+                    <div className="hidden md:flex items-center gap-2">
+                      <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-roomly-sky rounded-full"
+                          style={{ width: `${Math.min((users.length / maxUsers) * 100, 100)}%` }}
+                        />
                       </div>
-                      <div>
-                        <p className="font-semibold text-gray-800">{t.username}</p>
-                        <p className="text-xs text-gray-400">{t.email}</p>
-                      </div>
+                      <span className="text-xs text-gray-400">
+                        {Math.round((users.length / maxUsers) * 100)}%
+                      </span>
                     </div>
-                  </td>
-                  <td className="px-5 py-4 hidden lg:table-cell text-gray-600 text-xs">
-                    {propertyName(t.propertyId)}
-                  </td>
-                  <td className="px-5 py-4 hidden md:table-cell text-gray-500 text-xs">
-                    {formatDate(t.joinedAt)}
-                  </td>
-                  <td className="px-5 py-4">
-                    <Badge variant={t.isActive ? "green" : "gray"} dot>
-                      {t.isActive ? "Activo" : "Inactivo"}
-                    </Badge>
-                  </td>
-                  <td className="px-2 py-4 relative">
-                    <button
-                      onClick={() => setMenuOpen(menuOpen === t.id ? null : t.id)}
-                      className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                    >
-                      <MoreHorizontal className="w-4 h-4" />
-                    </button>
-                    {menuOpen === t.id && (
-                      <div className="absolute right-4 top-12 bg-white border border-gray-200 rounded-xl shadow-lg z-20 min-w-[160px] py-1.5 text-sm">
-                        <button
-                          onClick={() => toggleActive(t)}
-                          className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700"
-                        >
-                          {t.isActive ? (
-                            <>
-                              <UserX className="w-3.5 h-3.5" /> Desactivar
-                            </>
-                          ) : (
-                            <>
-                              <UserCheck className="w-3.5 h-3.5" /> Activar
-                            </>
-                          )}
-                        </button>
+                    <ChevronDown
+                      className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                    />
+                  </div>
+                </button>
+
+                {/* Users table */}
+                {isExpanded && (
+                  <>
+                    {users.length === 0 ? (
+                      <div className="px-5 py-8 border-t border-gray-50 text-center">
+                        <Users className="w-8 h-8 mx-auto mb-2 text-gray-200" />
+                        <p className="text-sm text-gray-400">
+                          Sin inquilinos{search ? " que coincidan con la búsqueda" : " registrados aún"}.
+                        </p>
                       </div>
+                    ) : (
+                      <table className="w-full text-sm border-t border-gray-100">
+                        <thead>
+                          <tr className="bg-gray-50/50">
+                            <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                              Inquilino
+                            </th>
+                            <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">
+                              Email
+                            </th>
+                            <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">
+                              Se unió
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {users.map((user) => {
+                            const initials = getInitials(user.username ?? user.email ?? "?");
+                            return (
+                              <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-5 py-3.5">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-roomly-lavender/30 text-violet-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                      {initials}
+                                    </div>
+                                    <span className="font-medium text-gray-800">
+                                      {user.username ?? "Sin nombre"}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="px-5 py-3.5 hidden md:table-cell">
+                                  <div className="flex items-center gap-1.5 text-gray-500 text-xs">
+                                    <Mail className="w-3.5 h-3.5 text-gray-300" />
+                                    {user.email}
+                                  </div>
+                                </td>
+                                <td className="px-5 py-3.5 hidden lg:table-cell">
+                                  <div className="flex items-center gap-1.5 text-gray-400 text-xs">
+                                    <Calendar className="w-3.5 h-3.5 text-gray-300" />
+                                    {formatUserDate(user.createdAt)}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
-
-      {menuOpen && <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(null)} />}
     </div>
   );
 }
