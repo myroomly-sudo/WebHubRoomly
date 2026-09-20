@@ -28,3 +28,31 @@ export function generatePropertyPassword(): string {
 export function getInitials(name: string): string {
   return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
 }
+
+export const INCIDENT_TYPE_LABELS: Record<string, string> = {
+  plumbing: "Fontanería",
+  electricity: "Electricidad",
+  appliance: "Electrodoméstico",
+  cleaning: "Limpieza",
+  noise: "Ruido",
+  other: "Otro",
+};
+
+export const INCIDENT_STATUS_LABELS: Record<string, string> = {
+  open: "Abierta",
+  in_progress: "En curso",
+  resolved: "Resuelta",
+  closed: "Cerrada",
+};
+
+export const PAYMENT_STATUS_LABELS: Record<string, string> = {
+  paid: "Pagado",
+  pending: "Pendiente",
+  overdue: "Retrasado",
+};
+
+export const ROOM_STATUS_LABELS: Record<string, string> = {
+  occupied: "Ocupada",
+  free: "Libre",
+  pending_payment: "Pago pendiente",
+};
