@@ -1,4 +1,3 @@
-// src/lib/utils.ts
 import { clsx, type ClassValue } from "clsx";
 
 export function cn(...inputs: ClassValue[]) {
@@ -6,45 +5,17 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat("es-ES", {
-    style: "currency",
-    currency: "EUR",
-  }).format(amount);
+  return new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(amount);
 }
 
 export function formatDate(date: Date | { toDate: () => Date } | string): string {
-  const d =
-    typeof date === "string"
-      ? new Date(date)
-      : "toDate" in date
-      ? date.toDate()
-      : date;
-  return new Intl.DateTimeFormat("es-ES", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(d);
-}
-
-export function formatDateShort(date: Date | { toDate: () => Date } | string): string {
-  const d =
-    typeof date === "string"
-      ? new Date(date)
-      : "toDate" in date
-      ? date.toDate()
-      : date;
-  return new Intl.DateTimeFormat("es-ES", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(d);
+  const d = typeof date === "string" ? new Date(date) : "toDate" in date ? date.toDate() : date;
+  return new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short", year: "numeric" }).format(d);
 }
 
 export function generatePropertyCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from({ length: 6 }, () =>
-    chars.charAt(Math.floor(Math.random() * chars.length))
-  ).join("");
+  return Array.from({ length: 6 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join("");
 }
 
 export function generatePropertyPassword(): string {
@@ -55,45 +26,5 @@ export function generatePropertyPassword(): string {
 }
 
 export function getInitials(name: string): string {
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
+  return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
 }
-
-export const INCIDENT_TYPE_LABELS: Record<string, string> = {
-  fontaneria: "Fontanería",
-  electricidad: "Luz / Electricidad",
-  cerrajeria: "Cerrajería",
-  electrodomesticos: "Electrodomésticos",
-  limpieza: "Limpieza",
-  otros: "Otros",
-};
-
-export const INCIDENT_SEVERITY_LABELS: Record<string, string> = {
-  baja: "Baja",
-  media: "Media",
-  alta: "Alta",
-};
-
-export const INCIDENT_STATUS_LABELS: Record<string, string> = {
-  abierta: "Abierta",
-  en_curso: "En curso",
-  resuelta: "Resuelta",
-  cerrada: "Cerrada",
-};
-
-export const PAYMENT_STATUS_LABELS: Record<string, string> = {
-  paid: "Pagado",
-  pending: "Pendiente",
-  overdue: "Retrasado",
-};
-
-export const ROOM_STATUS_LABELS: Record<string, string> = {
-  occupied: "Ocupada",
-  free: "Libre",
-  pending_payment: "Pago pendiente",
-};
-
