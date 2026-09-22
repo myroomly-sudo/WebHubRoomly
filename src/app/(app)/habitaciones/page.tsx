@@ -69,7 +69,7 @@ export default function HabitacionesPage() {
     for (let i = 0; i < propertyIds.length; i += 10) {
       const chunk = propertyIds.slice(i, i + 10);
       const snap = await getDocs(query(collection(db, "rooms"), where("propertyId", "in", chunk)));
-      snap.docs.forEach((d) => allRooms.push({ id: d.id, enabled: true, ...d.data() } as Room));
+      snap.docs.forEach((d) => { const data = d.data(); allRooms.push({ id: d.id, ...data, enabled: data.enabled !== false } as Room); });
     }
     allRooms.sort((a, b) => {
       if (a.propertyId !== b.propertyId) return a.propertyId.localeCompare(b.propertyId);
@@ -100,8 +100,12 @@ export default function HabitacionesPage() {
   };
 
   const toggleRoomEnabled = async (room: Room) => {
-    const newEnabled = !room.enabled;
     setMenuOpen(null);
+    // Re-read from Firestore to get the true current value (avoids stale state)
+    const roomSnap = await getDoc(doc(db, "rooms", room.id));
+    const currentEnabled = roomSnap.exists() ? roomSnap.data().enabled !== false : true;
+    const newEnabled = !currentEnabled;
+
     await updateDoc(doc(db, "rooms", room.id), { enabled: newEnabled, updatedAt: Timestamp.now() });
 
     // Recalculate maxUsers for this property
