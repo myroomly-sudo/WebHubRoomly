@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, X, Users, AlertTriangle, CheckCheck, Clock } from "lucide-react";
+import { Bell, X, Users, AlertTriangle, CheckCheck, Clock, UserCircle, LogOut } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { getInitials } from "@/lib/utils";
 import { useEffect, useState, useRef } from "react";
@@ -76,12 +76,14 @@ function useDateTime() {
 export default function Header() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const { date, time } = useDateTime();
 
   const [notifications, setNotifications] = useState<HubNotification[]>([]);
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const avatarRef = useRef<HTMLDivElement>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const title = Object.entries(ROUTE_TITLES).find(([key]) =>
     pathname === key || (key !== "/dashboard" && pathname.startsWith(key))
@@ -256,9 +258,52 @@ export default function Header() {
           )}
         </div>
 
-        {/* Avatar */}
-        <div className="w-8 h-8 rounded-full bg-roomly-navy text-white flex items-center justify-center text-xs font-bold">
-          {initials}
+        {/* Avatar + Profile dropdown */}
+        <div className="relative" ref={avatarRef}>
+          <button
+            onClick={() => setProfileOpen(!profileOpen)}
+            className="w-8 h-8 rounded-full bg-roomly-navy text-white flex items-center justify-center text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer"
+          >
+            {initials}
+          </button>
+
+          {profileOpen && (
+            <div className="absolute right-0 top-11 w-64 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 overflow-hidden">
+              {/* User info */}
+              <div className="px-4 py-3 border-b border-gray-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-roomly-navy text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
+                    {initials}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 truncate">{email}</p>
+                    <p className="text-xs text-gray-400">Administrador</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="py-1.5">
+                <button
+                  onClick={() => { router.push("/perfil"); setProfileOpen(false); }}
+                  className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <UserCircle className="w-4 h-4 text-gray-400" />
+                  Mi perfil
+                </button>
+              </div>
+
+              <div className="border-t border-gray-100 py-1.5">
+                <button
+                  onClick={() => { signOut(); setProfileOpen(false); }}
+                  className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Cerrar sesión
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </header>
