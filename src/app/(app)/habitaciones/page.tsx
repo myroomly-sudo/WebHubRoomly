@@ -211,8 +211,8 @@ export default function HabitacionesPage() {
                 const sb = roomStatusBadge(room.status);
                 const isDisabled = !room.enabled;
                 return (
-                  <tr key={room.id} className={`transition-colors ${isDisabled ? "bg-gray-50/50 opacity-60" : "hover:bg-gray-50"}`}>
-                    <td className="px-5 py-4">
+                  <tr key={room.id} className={`transition-colors ${isDisabled ? "bg-gray-50/50" : "hover:bg-gray-50"}`}>
+                    <td className={`px-5 py-4 ${isDisabled ? "opacity-50" : ""}`}>
                       <div className="flex items-center gap-3">
                         <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0 ${
                           isDisabled ? "bg-gray-100 text-gray-400" : "bg-violet-50 text-violet-600"}`}>
@@ -228,19 +228,19 @@ export default function HabitacionesPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-5 py-4 hidden lg:table-cell text-gray-600 text-xs">{propertyName(room.propertyId)}</td>
-                    <td className="px-5 py-4 hidden lg:table-cell text-gray-600">
+                    <td className={}>{propertyName(room.propertyId)}</td>
+                    <td className={}>
                       {room.currentTenantName ?? <span className="text-gray-300">—</span>}
                     </td>
-                    <td className="px-5 py-4 hidden md:table-cell font-medium text-gray-700">
+                    <td className={}>
                       {room.monthlyRent > 0 ? formatCurrency(room.monthlyRent) : <span className="text-gray-300">Sin precio</span>}
                     </td>
-                    <td className="px-5 py-4">
+                    <td className={}>
                       {isDisabled
                         ? <Badge variant="gray">Inhabilitada</Badge>
                         : <Badge variant={sb.variant} dot>{sb.label}</Badge>}
                     </td>
-                    <td className="px-2 py-4 relative">
+                    <td className="px-2 py-4 relative" style={{opacity: 1}}>
                       <button onClick={() => setMenuOpen(menuOpen === room.id ? null : room.id)}
                         className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
                         <MoreHorizontal className="w-4 h-4" />
