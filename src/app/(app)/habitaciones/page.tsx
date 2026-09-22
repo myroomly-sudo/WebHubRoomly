@@ -195,8 +195,8 @@ export default function HabitacionesPage() {
               <tr className="border-b border-gray-100 bg-gray-50/50">
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Habitación</th>
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">Piso</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">Inquilino</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden xl:table-cell">Alquiler/mes</th>
+                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">Inquilino</th>
+                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">Alquiler/mes</th>
                 <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Estado</th>
                 <th className="w-12 px-2" />
               </tr>
@@ -222,11 +222,11 @@ export default function HabitacionesPage() {
                       </div>
                     </td>
                     <td className="px-5 py-4 hidden lg:table-cell text-gray-600 text-xs">{propertyName(room.propertyId)}</td>
-                    <td className="px-5 py-4 hidden md:table-cell text-gray-600">
+                    <td className="px-5 py-4 hidden lg:table-cell text-gray-600">
                       {room.currentTenantName ?? <span className="text-gray-300">—</span>}
                     </td>
-                    <td className="px-5 py-4 hidden xl:table-cell font-medium text-gray-700">
-                      {room.monthlyRent ? formatCurrency(room.monthlyRent) : "—"}
+                    <td className="px-5 py-4 hidden md:table-cell font-medium text-gray-700">
+                      {room.monthlyRent > 0 ? formatCurrency(room.monthlyRent) : <span className="text-gray-300">Sin precio</span>}
                     </td>
                     <td className="px-5 py-4">
                       {isDisabled
@@ -308,3 +308,4 @@ export default function HabitacionesPage() {
     </div>
   );
 }
+
