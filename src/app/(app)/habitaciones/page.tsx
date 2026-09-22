@@ -101,14 +101,12 @@ export default function HabitacionesPage() {
 
   const toggleRoomEnabled = async (room: Room) => {
     setMenuOpen(null);
-    // Re-read from Firestore to get the true current value (avoids stale state)
     const roomSnap = await getDoc(doc(db, "rooms", room.id));
     const currentEnabled = roomSnap.exists() ? roomSnap.data().enabled !== false : true;
     const newEnabled = !currentEnabled;
 
     await updateDoc(doc(db, "rooms", room.id), { enabled: newEnabled, updatedAt: Timestamp.now() });
 
-    // Recalculate maxUsers for this property
     const propRef = doc(db, "properties", room.propertyId);
     const propSnap = await getDoc(propRef);
     if (propSnap.exists()) {
@@ -212,7 +210,7 @@ export default function HabitacionesPage() {
                 const isDisabled = !room.enabled;
                 return (
                   <tr key={room.id} className={`transition-colors ${isDisabled ? "bg-gray-50/50" : "hover:bg-gray-50"}`}>
-                    <td className={`px-5 py-4 ${isDisabled ? "opacity-50" : ""}`}>
+                    <td className="px-5 py-4">
                       <div className="flex items-center gap-3">
                         <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0 ${
                           isDisabled ? "bg-gray-100 text-gray-400" : "bg-violet-50 text-violet-600"}`}>
@@ -228,19 +226,19 @@ export default function HabitacionesPage() {
                         </div>
                       </div>
                     </td>
-                    <td className={}>{propertyName(room.propertyId)}</td>
-                    <td className={}>
+                    <td className="px-5 py-4 hidden lg:table-cell text-gray-600 text-xs">{propertyName(room.propertyId)}</td>
+                    <td className="px-5 py-4 hidden lg:table-cell text-gray-600">
                       {room.currentTenantName ?? <span className="text-gray-300">—</span>}
                     </td>
-                    <td className={}>
+                    <td className="px-5 py-4 hidden md:table-cell font-medium text-gray-700">
                       {room.monthlyRent > 0 ? formatCurrency(room.monthlyRent) : <span className="text-gray-300">Sin precio</span>}
                     </td>
-                    <td className={}>
+                    <td className="px-5 py-4">
                       {isDisabled
                         ? <Badge variant="gray">Inhabilitada</Badge>
                         : <Badge variant={sb.variant} dot>{sb.label}</Badge>}
                     </td>
-                    <td className="px-2 py-4 relative" style={{opacity: 1}}>
+                    <td className="px-2 py-4 relative">
                       <button onClick={() => setMenuOpen(menuOpen === room.id ? null : room.id)}
                         className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
                         <MoreHorizontal className="w-4 h-4" />
