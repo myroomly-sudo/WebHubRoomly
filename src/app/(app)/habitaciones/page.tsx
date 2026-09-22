@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   DoorOpen, Search, Filter, MoreHorizontal, Pencil,
   ToggleLeft, ToggleRight,
@@ -43,6 +44,7 @@ type RoomStatusFilter = "all" | "occupied" | "free" | "pending_payment" | "disab
 
 export default function HabitacionesPage() {
   const { agencyId } = useAuth();
+  const searchParams = useSearchParams();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,6 +82,12 @@ export default function HabitacionesPage() {
   };
 
   useEffect(() => { load(); }, [agencyId]);
+
+  // Auto-apply property filter from URL param ?piso=
+  useEffect(() => {
+    const pisoParam = searchParams.get("piso");
+    if (pisoParam) setPropertyFilter(pisoParam);
+  }, [searchParams]);
 
   const propertyName = (id: string) => properties.find((p) => p.id === id)?.name ?? "—";
 
