@@ -27,6 +27,7 @@ interface Room {
   currentTenantId?: string | null;
   currentTenantName?: string | null;
   floor?: number;
+  description?: string;
 }
 
 interface Property {
@@ -84,7 +85,7 @@ export default function HabitacionesPage() {
 
   const openEdit = (room: Room) => {
     setEditRoom(room);
-    setForm({ name: room.name, number: room.number, status: room.status, monthlyRent: room.monthlyRent, floor: room.floor });
+    setForm({ name: room.name, number: room.number, status: room.status, monthlyRent: room.monthlyRent, floor: room.floor, description: room.description ?? "" });
     setMenuOpen(null);
   };
 
@@ -217,7 +218,9 @@ export default function HabitacionesPage() {
                           <p className="font-semibold text-gray-800">{room.name}</p>
                           {isDisabled
                             ? <p className="text-xs text-red-400 font-medium">Inhabilitada</p>
-                            : room.floor !== undefined && <p className="text-xs text-gray-400">Planta {room.floor}</p>}
+                            : room.description
+                              ? <p className="text-xs text-gray-400">{room.description}</p>
+                              : room.floor !== undefined && <p className="text-xs text-gray-400">Planta {room.floor}</p>}
                         </div>
                       </div>
                     </td>
@@ -273,6 +276,12 @@ export default function HabitacionesPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Número</label>
               <input className="input-field" value={form.number ?? ""} onChange={(e) => setForm({ ...form, number: e.target.value })} />
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Descripción</label>
+            <input className="input-field" placeholder="ej. Suite exterior, Habitación doble…"
+              value={form.description ?? ""}
+              onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Estado</label>
