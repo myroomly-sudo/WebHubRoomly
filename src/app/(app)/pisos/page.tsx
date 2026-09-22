@@ -70,6 +70,7 @@ export default function PisosPage() {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(DEFAULT_FORM);
+  const [userCountMap, setUserCountMap] = useState<Record<string, number>>({});
   const [roomConfigs, setRoomConfigs] = useState<RoomConfig[]>([]);
 
   const load = async () => {
@@ -77,15 +78,31 @@ export default function PisosPage() {
     const snap = await getDocs(
       query(collection(db, "properties"), where("agencyId", "==", agencyId))
     );
-    setProperties(
-      snap.docs
+    const props = snap.docs
         .map((d) => ({ id: d.id, ...d.data() } as Property))
         .sort((a, b) => {
           const aT = (a.createdAt as any)?.toDate?.()?.getTime() ?? 0;
           const bT = (b.createdAt as any)?.toDate?.()?.getTime() ?? 0;
           return bT - aT;
-        })
-    );
+        });
+    setProperties(props);
+
+    // Count users per property from the users collection
+    const propIds = props.map((p) => p.id);
+    const countMap: Record<string, number> = {};
+    if (propIds.length) {
+      for (let i = 0; i < propIds.length; i += 10) {
+        const chunk = propIds.slice(i, i + 10);
+        const usersSnap = await getDocs(
+          query(collection(db, "users"), where("propertyId", "in", chunk))
+        );
+        usersSnap.docs.forEach((d) => {
+          const pid = d.data().propertyId;
+          countMap[pid] = (countMap[pid] ?? 0) + 1;
+        });
+      }
+    }
+    setUserCountMap(countMap);
     setLoading(false);
   };
 
@@ -301,7 +318,7 @@ export default function PisosPage() {
                     </td>
                     <td className="px-5 py-4 hidden md:table-cell">
                       <div className="flex items-center gap-3 text-gray-600 text-xs">
-                        <div className="flex items-center gap-1"><Users className="w-3.5 h-3.5 text-gray-400" />{p.currentUsers}/{p.maxUsers}</div>
+                        <div className="flex items-center gap-1"><Users className="w-3.5 h-3.5 text-gray-400" />{userCountMap[p.id] ?? 0}/{p.maxUsers}</div>
                         <div className="flex items-center gap-1"><DoorOpen className="w-3.5 h-3.5 text-gray-400" />{p.roomCount ?? "—"}</div>
                       </div>
                     </td>
