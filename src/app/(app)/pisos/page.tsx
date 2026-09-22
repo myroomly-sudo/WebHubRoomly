@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Building2, Plus, Search, MoreHorizontal,
-  Pencil, Trash2, Users, Copy, CheckCheck, DoorOpen,
+  Pencil, Trash2, Users, Copy, CheckCheck, DoorOpen, Euro,
 } from "lucide-react";
 import {
   collection, query, where, getDocs, addDoc, updateDoc,
@@ -31,9 +31,16 @@ interface Property {
   maxUsers: number;
   currentUsers: number;
   roomCount?: number;
+  defaultMonthlyRent?: number;
   houseRules?: string;
   createdAt: unknown;
   updatedAt: unknown;
+}
+
+interface RoomConfig {
+  number: number;
+  description: string;
+  monthlyRent: number;
 }
 
 const DEFAULT_FORM = {
@@ -44,6 +51,13 @@ const DEFAULT_FORM = {
   roomCount: 4,
   defaultMonthlyRent: 0,
 };
+
+function buildRoomConfigs(count: number, existing: RoomConfig[]): RoomConfig[] {
+  return Array.from({ length: count }, (_, i) => {
+    const n = i + 1;
+    return existing.find((r) => r.number === n) ?? { number: n, description: "", monthlyRent: 0 };
+  });
+}
 
 export default function PisosPage() {
   const { agencyId } = useAuth();
@@ -56,6 +70,7 @@ export default function PisosPage() {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(DEFAULT_FORM);
+  const [roomConfigs, setRoomConfigs] = useState<RoomConfig[]>([]);
 
   const load = async () => {
     if (!agencyId) return;
@@ -76,9 +91,17 @@ export default function PisosPage() {
 
   useEffect(() => { load(); }, [agencyId]);
 
+  // When roomCount changes, rebuild the room config list preserving existing entries
+  useEffect(() => {
+    if (!editTarget) {
+      setRoomConfigs(buildRoomConfigs(form.roomCount, roomConfigs));
+    }
+  }, [form.roomCount]);
+
   const openCreate = () => {
     setEditTarget(null);
     setForm(DEFAULT_FORM);
+    setRoomConfigs(buildRoomConfigs(DEFAULT_FORM.roomCount, []));
     setShowModal(true);
   };
 
@@ -90,24 +113,32 @@ export default function PisosPage() {
       city: p.city,
       houseRules: p.houseRules ?? "",
       roomCount: p.roomCount ?? 0,
-      defaultMonthlyRent: (p as any).defaultMonthlyRent ?? 0,
+      defaultMonthlyRent: p.defaultMonthlyRent ?? 0,
     });
+    setRoomConfigs([]);
     setMenuOpen(null);
     setShowModal(true);
   };
 
-  const createRoomsForProperty = async (propertyId: string, roomCount: number, monthlyRent: number) => {
+  const updateRoomConfig = (index: number, field: keyof RoomConfig, value: string | number) => {
+    setRoomConfigs((prev) =>
+      prev.map((r, i) => (i === index ? { ...r, [field]: value } : r))
+    );
+  };
+
+  const createRoomsForProperty = async (propertyId: string, configs: RoomConfig[], propertyName: string) => {
     const batch = writeBatch(db);
-    for (let i = 1; i <= roomCount; i++) {
+    for (const cfg of configs) {
       const roomRef = doc(collection(db, "rooms"));
       batch.set(roomRef, {
         propertyId,
         agencyId,
-        name: `Habitación ${i}`,
-        number: String(i),
+        name: `${propertyName} — Hab. ${cfg.number}`,
+        number: String(cfg.number),
+        description: cfg.description,
         status: "free",
         enabled: true,
-        monthlyRent: monthlyRent,
+        monthlyRent: cfg.monthlyRent,
         currentTenantId: null,
         currentTenantName: null,
         floor: 1,
@@ -143,7 +174,7 @@ export default function PisosPage() {
           houseRules: form.houseRules,
           roomCount: form.roomCount,
           defaultMonthlyRent: form.defaultMonthlyRent,
-          maxUsers: form.roomCount, // maxUsers = roomCount por defecto
+          maxUsers: form.roomCount,
           propertyCode: code,
           propertyPassword: password,
           code,
@@ -154,8 +185,8 @@ export default function PisosPage() {
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
         });
-        if (form.roomCount > 0) {
-          await createRoomsForProperty(newPropRef.id, form.roomCount, form.defaultMonthlyRent ?? 0);
+        if (roomConfigs.length > 0) {
+          await createRoomsForProperty(newPropRef.id, roomConfigs, form.name);
         }
       }
       setShowModal(false);
@@ -303,7 +334,8 @@ export default function PisosPage() {
         </div>
       )}
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title={editTarget ? "Editar piso" : "Nuevo piso"}>
+      {/* Modal crear / editar piso */}
+      <Modal open={showModal} onClose={() => setShowModal(false)} title={editTarget ? "Editar piso" : "Nuevo piso"} maxWidth="lg">
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Nombre del piso *</label>
@@ -326,26 +358,48 @@ export default function PisosPage() {
             />
             {editTarget
               ? <p className="text-xs text-gray-400 mt-1">Las habitaciones se gestionan desde la sección Habitaciones.</p>
-              : <p className="text-xs text-gray-400 mt-1">Se crean automáticamente. El máximo de inquilinos se ajusta al mismo valor.</p>
+              : <p className="text-xs text-gray-400 mt-1">Se crean automáticamente al guardar.</p>
             }
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Precio mensual por habitación (€)</label>
-            <input
-              type="number"
-              min={0}
-              className="input-field"
-              placeholder="ej. 650"
-              value={form.defaultMonthlyRent || ""}
-              onChange={(e) => setForm({ ...form, defaultMonthlyRent: Number(e.target.value) })}
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              {editTarget ? "Actualiza el precio por defecto del piso. Edita habitaciones individuales para precios distintos." : "Se asignará a todas las habitaciones al crearlas. Puedes editarlas individualmente después."}
-            </p>
-          </div>
+
+          {/* Configuración individual de habitaciones — solo al crear */}
+          {!editTarget && roomConfigs.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Configuración de habitaciones
+              </label>
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {roomConfigs.map((cfg, i) => (
+                  <div key={cfg.number} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                      {cfg.number}
+                    </div>
+                    <input
+                      className="input-field flex-1 text-xs py-1.5"
+                      placeholder="Descripción (ej. Suite, Exterior…)"
+                      value={cfg.description}
+                      onChange={(e) => updateRoomConfig(i, "description", e.target.value)}
+                    />
+                    <div className="relative flex-shrink-0 w-28">
+                      <Euro className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                      <input
+                        type="number"
+                        min={0}
+                        className="input-field pl-7 text-xs py-1.5 w-full"
+                        placeholder="Precio"
+                        value={cfg.monthlyRent || ""}
+                        onChange={(e) => updateRoomConfig(i, "monthlyRent", Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Normas de convivencia</label>
-            <textarea className="input-field resize-none h-24" placeholder="Escribe las normas…"
+            <textarea className="input-field resize-none h-20" placeholder="Escribe las normas…"
               value={form.houseRules} onChange={(e) => setForm({ ...form, houseRules: e.target.value })} />
           </div>
           <div className="flex justify-end gap-3 pt-2">
@@ -361,4 +415,3 @@ export default function PisosPage() {
     </div>
   );
 }
-
