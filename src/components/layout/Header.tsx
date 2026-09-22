@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, X, Users, AlertTriangle, CheckCheck } from "lucide-react";
+import { Bell, X, Users, AlertTriangle, CheckCheck, Clock } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { getInitials } from "@/lib/utils";
 import { useEffect, useState, useRef } from "react";
@@ -33,7 +33,7 @@ interface HubNotification {
   read: boolean;
   propertyId?: string;
   propertyName?: string;
-  targetId?: string; // userId or incidentId
+  targetId?: string;
   createdAt: Timestamp | Date | string;
   agencyId: string;
 }
@@ -52,10 +52,32 @@ function timeAgo(date: HubNotification["createdAt"]): string {
   return `hace ${Math.floor(diff / 86400)}d`;
 }
 
+function useDateTime() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const date = now.toLocaleDateString("es-ES", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+  const time = now.toLocaleTimeString("es-ES", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  return { date, time };
+}
+
 export default function Header() {
   const pathname = usePathname();
   const router = useRouter();
   const { user } = useAuth();
+  const { date, time } = useDateTime();
 
   const [notifications, setNotifications] = useState<HubNotification[]>([]);
   const [open, setOpen] = useState(false);
@@ -69,13 +91,11 @@ export default function Header() {
   const initials = getInitials(email.split("@")[0]);
   const agencyId = user?.uid;
 
-  // Real-time listener — only starts once Firebase Auth confirms the session
   useEffect(() => {
     if (!agencyId || !user) return;
 
     let unsub: (() => void) | undefined;
 
-    // Small delay to ensure Auth token is ready before opening a persistent connection
     const timer = setTimeout(() => {
       try {
         const q = query(
@@ -105,7 +125,6 @@ export default function Header() {
     };
   }, [agencyId, user]);
 
-  // Close panel when clicking outside
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
@@ -119,16 +138,9 @@ export default function Header() {
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const markAsRead = async (notif: HubNotification) => {
-    // Mark as read in Firestore
     await updateDoc(doc(db, "hubNotifications", notif.id), { read: true });
-
-    // Navigate to relevant section
-    if (notif.type === "new_user") {
-      router.push("/usuarios");
-    } else if (notif.type === "new_incident") {
-      router.push("/incidencias");
-    }
-
+    if (notif.type === "new_user") router.push("/usuarios");
+    else if (notif.type === "new_incident") router.push("/incidencias");
     setOpen(false);
   };
 
@@ -156,6 +168,14 @@ export default function Header() {
       <h1 className="text-base font-semibold text-roomly-charcoal">{title}</h1>
 
       <div className="flex items-center gap-3">
+
+        {/* Fecha y hora en tiempo real */}
+        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-100 rounded-xl">
+          <Clock className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+          <span className="text-xs text-gray-500 capitalize">{date}</span>
+          <span className="text-xs font-semibold text-roomly-navy tabular-nums">{time}</span>
+        </div>
+
         {/* Notifications */}
         <div className="relative" ref={panelRef}>
           <button
@@ -168,10 +188,8 @@ export default function Header() {
             )}
           </button>
 
-          {/* Notifications panel */}
           {open && (
             <div className="absolute right-0 top-11 w-80 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 overflow-hidden">
-              {/* Panel header */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold text-gray-800">Notificaciones</span>
@@ -200,7 +218,6 @@ export default function Header() {
                 </div>
               </div>
 
-              {/* List */}
               <div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
                 {notifications.length === 0 ? (
                   <div className="px-4 py-8 text-center">
@@ -247,3 +264,4 @@ export default function Header() {
     </header>
   );
 }
+
