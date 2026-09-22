@@ -42,6 +42,7 @@ const DEFAULT_FORM = {
   city: "",
   houseRules: "",
   roomCount: 4,
+  defaultMonthlyRent: 0,
 };
 
 export default function PisosPage() {
@@ -89,12 +90,13 @@ export default function PisosPage() {
       city: p.city,
       houseRules: p.houseRules ?? "",
       roomCount: p.roomCount ?? 0,
+      defaultMonthlyRent: (p as any).defaultMonthlyRent ?? 0,
     });
     setMenuOpen(null);
     setShowModal(true);
   };
 
-  const createRoomsForProperty = async (propertyId: string, roomCount: number) => {
+  const createRoomsForProperty = async (propertyId: string, roomCount: number, monthlyRent: number) => {
     const batch = writeBatch(db);
     for (let i = 1; i <= roomCount; i++) {
       const roomRef = doc(collection(db, "rooms"));
@@ -105,7 +107,7 @@ export default function PisosPage() {
         number: String(i),
         status: "free",
         enabled: true,
-        monthlyRent: 0,
+        monthlyRent: monthlyRent,
         currentTenantId: null,
         currentTenantName: null,
         floor: 1,
@@ -127,6 +129,7 @@ export default function PisosPage() {
           city: form.city,
           houseRules: form.houseRules,
           roomCount: form.roomCount,
+          defaultMonthlyRent: form.defaultMonthlyRent,
           updatedAt: Timestamp.now(),
         });
       } else {
@@ -139,6 +142,7 @@ export default function PisosPage() {
           city: form.city,
           houseRules: form.houseRules,
           roomCount: form.roomCount,
+          defaultMonthlyRent: form.defaultMonthlyRent,
           maxUsers: form.roomCount, // maxUsers = roomCount por defecto
           propertyCode: code,
           propertyPassword: password,
@@ -151,7 +155,7 @@ export default function PisosPage() {
           updatedAt: Timestamp.now(),
         });
         if (form.roomCount > 0) {
-          await createRoomsForProperty(newPropRef.id, form.roomCount);
+          await createRoomsForProperty(newPropRef.id, form.roomCount, form.defaultMonthlyRent ?? 0);
         }
       }
       setShowModal(false);
@@ -326,6 +330,20 @@ export default function PisosPage() {
             }
           </div>
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Precio mensual por habitación (€)</label>
+            <input
+              type="number"
+              min={0}
+              className="input-field"
+              placeholder="ej. 650"
+              value={form.defaultMonthlyRent || ""}
+              onChange={(e) => setForm({ ...form, defaultMonthlyRent: Number(e.target.value) })}
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              {editTarget ? "Actualiza el precio por defecto del piso. Edita habitaciones individuales para precios distintos." : "Se asignará a todas las habitaciones al crearlas. Puedes editarlas individualmente después."}
+            </p>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Normas de convivencia</label>
             <textarea className="input-field resize-none h-24" placeholder="Escribe las normas…"
               value={form.houseRules} onChange={(e) => setForm({ ...form, houseRules: e.target.value })} />
@@ -343,3 +361,4 @@ export default function PisosPage() {
     </div>
   );
 }
+
