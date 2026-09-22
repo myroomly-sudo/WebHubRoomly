@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Building2, Plus, Search, MoreHorizontal,
-  Pencil, Trash2, Users, Copy, CheckCheck, DoorOpen, Euro,
+  Pencil, Trash2, Users, Copy, CheckCheck, DoorOpen, Euro, SlidersHorizontal,
 } from "lucide-react";
 import {
   collection, query, where, getDocs, addDoc, updateDoc,
@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
+import { useRouter } from "next/navigation";
 import Modal from "@/components/ui/Modal";
 import EmptyState from "@/components/ui/EmptyState";
 import Badge, { propertyStatusBadge } from "@/components/ui/Badge";
@@ -61,6 +62,7 @@ function buildRoomConfigs(count: number, existing: RoomConfig[]): RoomConfig[] {
 
 export default function PisosPage() {
   const { agencyId } = useAuth();
+  const router = useRouter();
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -332,6 +334,15 @@ export default function PisosPage() {
                         <div className="absolute right-4 top-12 bg-white border border-gray-200 rounded-xl shadow-lg z-20 min-w-[160px] py-1.5 text-sm">
                           <button onClick={() => openEdit(p)} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
                             <Pencil className="w-3.5 h-3.5" /> Editar
+                          </button>
+                          <button
+                            onClick={() => {
+                              setMenuOpen(null);
+                              router.push(`/habitaciones?piso=${p.id}`);
+                            }}
+                            className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700"
+                          >
+                            <SlidersHorizontal className="w-3.5 h-3.5" /> Gestionar habitaciones
                           </button>
                           <button onClick={() => handleToggleStatus(p)} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
                             <Building2 className="w-3.5 h-3.5" />{p.status === "active" ? "Desactivar" : "Activar"}
