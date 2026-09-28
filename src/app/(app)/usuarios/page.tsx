@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, Search, Building2, ChevronDown, Mail, Calendar } from "lucide-react";
+import { Users, Search, Building2, ChevronDown, Mail, Calendar, Phone } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import {
   collection,
@@ -17,6 +17,7 @@ interface FirestoreUser {
   email: string;
   username: string;
   propertyId: string;
+  phone?: string;
   createdAt: string | Date | { toDate: () => Date };
   avatarUrl?: string;
 }
@@ -242,6 +243,9 @@ export default function UsuariosPage() {
                             <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">
                               Se unió
                             </th>
+                            <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden xl:table-cell">
+                              Teléfono
+                            </th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
@@ -271,6 +275,16 @@ export default function UsuariosPage() {
                                     {formatUserDate(user.createdAt)}
                                   </div>
                                 </td>
+                                <td className="px-5 py-3.5 hidden xl:table-cell">
+                                  {user.phone ? (
+                                    <div className="flex items-center gap-1.5 text-gray-600 text-xs">
+                                      <Phone className="w-3.5 h-3.5 text-gray-300" />
+                                      {user.phone}
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-300 text-xs">—</span>
+                                  )}
+                                </td>
                               </tr>
                             );
                           })}
@@ -287,3 +301,4 @@ export default function UsuariosPage() {
     </div>
   );
 }
+
