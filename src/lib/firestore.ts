@@ -301,6 +301,104 @@ export async function markPaymentPaid(id: string): Promise<void> {
   });
 }
 
+// ─── CREATE PAYMENT ───────────────────────────────────────────────────────────
+
+export async function createPayment(data: {
+  agencyId: string;
+  propertyId: string;
+  propertyName: string;
+  roomId: string;
+  roomNumber: string;
+  roomName: string;
+  tenantId: string;
+  tenantName: string;
+  amount: number;
+  dueDate: Date;
+  concept: string;
+  month: string;
+}): Promise<string> {
+  const ref = await addDoc(collection(db, "payments"), {
+    ...data,
+    status: "pending",
+    tenantNotified: false,
+    tenantNote: "",
+    dueDate: Timestamp.fromDate(data.dueDate),
+    createdAt: Timestamp.now(),
+  });
+  return ref.id;
+}
+
+export async function markPaymentOverdue(id: string): Promise<void> {
+  await updateDoc(doc(db, "payments", id), {
+    status: "overdue",
+  });
+}
+
+export async function markPaymentPending(id: string): Promise<void> {
+  await updateDoc(doc(db, "payments", id), {
+    status: "pending",
+    paidAt: null,
+  });
+}
+
+// Generate monthly payments for all occupied rooms of a property
+export async function generateMonthlyPayments(
+  agencyId: string,
+  propertyId: string,
+  propertyName: string,
+  month: string // "2025-01"
+): Promise<number> {
+  // Get all rooms with tenants for this property
+  const roomsSnap = await getDocs(
+    query(
+      collection(db, "rooms"),
+      where("propertyId", "==", propertyId),
+      where("status", "==", "occupied")
+    )
+  );
+
+  // Check which rooms already have a payment for this month
+  const existingSnap = await getDocs(
+    query(
+      collection(db, "payments"),
+      where("propertyId", "==", propertyId),
+      where("month", "==", month)
+    )
+  );
+  const existingRoomIds = new Set(existingSnap.docs.map((d) => d.data().roomId));
+
+  const [year, m] = month.split("-").map(Number);
+  const dueDate = new Date(year, m - 1, 5); // vence el 5 de cada mes
+
+  let created = 0;
+  for (const roomDoc of roomsSnap.docs) {
+    const room = roomDoc.data();
+    if (existingRoomIds.has(roomDoc.id)) continue; // ya existe
+    if (!room.currentTenantId) continue;
+
+    await addDoc(collection(db, "payments"), {
+      agencyId,
+      propertyId,
+      propertyName,
+      roomId: roomDoc.id,
+      roomNumber: room.number,
+      roomName: room.name,
+      tenantId: room.currentTenantId,
+      tenantName: room.currentTenantName ?? "",
+      amount: room.monthlyRent ?? 0,
+      dueDate: Timestamp.fromDate(dueDate),
+      concept: `Alquiler ${month}`,
+      month,
+      status: "pending",
+      tenantNotified: false,
+      tenantNote: "",
+      createdAt: Timestamp.now(),
+    });
+    created++;
+  }
+  return created;
+}
+
 // ─── DASHBOARD STATS ───────────────────────────────────────────────────────
 
 export async function getDashboardStats(agencyId: string): Promise<DashboardStats> {
@@ -363,4 +461,3 @@ export function subscribeToIncidents(
     callback(incidents);
   });
 }
-
