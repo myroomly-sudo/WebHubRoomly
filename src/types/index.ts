@@ -95,10 +95,12 @@ export interface Incident {
 
 export interface Payment {
   id: string;
+  agencyId: string;
   propertyId: string;
   propertyName?: string;
   roomId: string;
   roomNumber?: string;
+  roomName?: string;
   tenantId: string;
   tenantName?: string;
   amount: number;
@@ -107,6 +109,8 @@ export interface Payment {
   status: PaymentStatus;
   concept: string;
   month: string; // e.g. "2024-06"
+  tenantNotified: boolean; // inquilino ha declarado haberlo pagado
+  tenantNote?: string;     // nota opcional del inquilino
   createdAt: Date;
 }
 
