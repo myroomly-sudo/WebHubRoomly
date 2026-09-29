@@ -15,6 +15,7 @@ import Badge, { roomStatusBadge } from "@/components/ui/Badge";
 import Modal from "@/components/ui/Modal";
 import EmptyState from "@/components/ui/EmptyState";
 import { formatCurrency, cn } from "@/lib/utils";
+import ExcelExportButton from "@/components/ui/ExcelExportButton";
 
 interface Room {
   id: string;
@@ -208,6 +209,29 @@ export default function HabitacionesPage() {
             {rooms.filter((r) => r.enabled).length} activas · {counts.disabled} inhabilitadas · {rooms.length} total
           </p>
         </div>
+        <ExcelExportButton
+          filename="habitaciones"
+          data={filtered.map((r) => ({
+            nombre: r.name,
+            numero: r.number,
+            piso: propertyName(r.propertyId),
+            descripcion: r.description ?? "",
+            inquilino: r.currentTenantName ?? "",
+            alquiler: r.monthlyRent,
+            estado: r.enabled ? (r.status === "occupied" ? "Ocupada" : r.status === "free" ? "Libre" : "Pago pendiente") : "Inhabilitada",
+            planta: r.floor ?? "",
+          }))}
+          columns={[
+            { header: "Nombre", key: "nombre" },
+            { header: "Número", key: "numero" },
+            { header: "Piso", key: "piso" },
+            { header: "Descripción", key: "descripcion" },
+            { header: "Inquilino", key: "inquilino" },
+            { header: "Alquiler (€)", key: "alquiler" },
+            { header: "Estado", key: "estado" },
+            { header: "Planta", key: "planta" },
+          ]}
+        />
       </div>
 
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit overflow-x-auto">
