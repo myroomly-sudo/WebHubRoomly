@@ -9,6 +9,7 @@ import type { Incident, IncidentStatus, Property } from "@/types";
 import Badge, { incidentStatusBadge, incidentSeverityBadge } from "@/components/ui/Badge";
 import Modal from "@/components/ui/Modal";
 import EmptyState from "@/components/ui/EmptyState";
+import ExcelExportButton from "@/components/ui/ExcelExportButton";
 import { formatDate, INCIDENT_TYPE_LABELS } from "@/lib/utils";
 
 type StatusFilter = "all" | IncidentStatus;
