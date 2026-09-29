@@ -243,7 +243,7 @@ export default function PisosPage() {
               ciudad: p.city,
               codigo: p.propertyCode,
               contrasena: p.propertyPassword,
-              inquilinos: `${userCountMap[p.id] ?? 0}/${p.maxUsers}`,
+              inquilinos: `${p.currentUsers ?? 0}/${p.maxUsers}`,
               habitaciones: p.roomCount ?? 0,
               estado: p.status === "active" ? "Activo" : "Inactivo",
             }))}
