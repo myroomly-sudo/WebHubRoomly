@@ -9,8 +9,8 @@ import type { Incident, IncidentStatus, Property } from "@/types";
 import Badge, { incidentStatusBadge, incidentSeverityBadge } from "@/components/ui/Badge";
 import Modal from "@/components/ui/Modal";
 import EmptyState from "@/components/ui/EmptyState";
-import ExcelExportButton from "@/components/ui/ExcelExportButton";
 import { formatDate, INCIDENT_TYPE_LABELS } from "@/lib/utils";
+import ExcelExportButton from "@/components/ui/ExcelExportButton";
 
 type StatusFilter = "all" | IncidentStatus;
 
@@ -103,6 +103,29 @@ export default function IncidenciasPage() {
           <h2 className="section-title">Incidencias</h2>
           <p className="text-sm text-gray-400 mt-0.5">{incidents.length} incidencias registradas</p>
         </div>
+        <ExcelExportButton
+          filename="incidencias"
+          data={filtered.map((i) => ({
+            tipo: INCIDENT_TYPE_LABELS[i.type] ?? i.type,
+            descripcion: i.description,
+            piso: i.propertyName ?? "",
+            inquilino: i.createdByUsername ?? "",
+            gravedad: i.severity === "alta" ? "Alta" : i.severity === "media" ? "Media" : "Baja",
+            estado: i.status === "abierta" ? "Abierta" : i.status === "en_curso" ? "En curso" : i.status === "resuelta" ? "Resuelta" : "Cerrada",
+            fecha: i.createdAt ? new Date(i.createdAt).toLocaleDateString("es-ES") : "",
+            notas_agencia: i.agencyNotes ?? "",
+          }))}
+          columns={[
+            { header: "Tipo", key: "tipo" },
+            { header: "Descripción", key: "descripcion" },
+            { header: "Piso", key: "piso" },
+            { header: "Inquilino", key: "inquilino" },
+            { header: "Gravedad", key: "gravedad" },
+            { header: "Estado", key: "estado" },
+            { header: "Fecha", key: "fecha" },
+            { header: "Notas agencia", key: "notas_agencia" },
+          ]}
+        />
       </div>
 
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit overflow-x-auto">
