@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import {
   DoorOpen, Search, Filter, MoreHorizontal, Pencil,
-  ToggleLeft, ToggleRight,
+  ToggleLeft, ToggleRight, User,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -40,13 +39,20 @@ interface Property {
   maxUsers: number;
 }
 
+interface Tenant {
+  id: string;
+  username: string;
+  email: string;
+  propertyId: string;
+}
+
 type RoomStatusFilter = "all" | "occupied" | "free" | "pending_payment" | "disabled";
 
 export default function HabitacionesPage() {
   const { agencyId } = useAuth();
-  const searchParams = useSearchParams();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
+  const [tenantsByProperty, setTenantsByProperty] = useState<Record<string, Tenant[]>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<RoomStatusFilter>("all");
@@ -67,6 +73,7 @@ export default function HabitacionesPage() {
     const propertyIds = props.map((p) => p.id);
     if (!propertyIds.length) { setLoading(false); return; }
 
+    // Load rooms
     const allRooms: Room[] = [];
     for (let i = 0; i < propertyIds.length; i += 10) {
       const chunk = propertyIds.slice(i, i + 10);
@@ -78,23 +85,59 @@ export default function HabitacionesPage() {
       return Number(a.number) - Number(b.number);
     });
     setRooms(allRooms);
+
+    // Load tenants grouped by property
+    const tenantsMap: Record<string, Tenant[]> = {};
+    for (let i = 0; i < propertyIds.length; i += 10) {
+      const chunk = propertyIds.slice(i, i + 10);
+      const snap = await getDocs(query(collection(db, "users"), where("propertyId", "in", chunk)));
+      snap.docs.forEach((d) => {
+        const t = { id: d.id, ...d.data() } as Tenant;
+        if (!tenantsMap[t.propertyId]) tenantsMap[t.propertyId] = [];
+        tenantsMap[t.propertyId].push(t);
+      });
+    }
+    setTenantsByProperty(tenantsMap);
     setLoading(false);
   };
 
   useEffect(() => { load(); }, [agencyId]);
 
-  // Auto-apply property filter from URL param ?piso=
-  useEffect(() => {
-    const pisoParam = searchParams.get("piso");
-    if (pisoParam) setPropertyFilter(pisoParam);
-  }, [searchParams]);
-
   const propertyName = (id: string) => properties.find((p) => p.id === id)?.name ?? "—";
 
   const openEdit = (room: Room) => {
     setEditRoom(room);
-    setForm({ name: room.name, number: room.number, status: room.status, monthlyRent: room.monthlyRent, floor: room.floor, description: room.description ?? "" });
+    setForm({
+      name: room.name,
+      number: room.number,
+      status: room.status,
+      monthlyRent: room.monthlyRent,
+      floor: room.floor,
+      description: room.description ?? "",
+      currentTenantId: room.currentTenantId ?? "",
+      currentTenantName: room.currentTenantName ?? "",
+    });
     setMenuOpen(null);
+  };
+
+  // When tenant selection changes, auto-fill name
+  const handleTenantChange = (tenantId: string) => {
+    const propertyId = editRoom?.propertyId ?? "";
+    const tenant = tenantsByProperty[propertyId]?.find((t) => t.id === tenantId);
+    setForm((f) => ({
+      ...f,
+      currentTenantId: tenantId || null,
+      currentTenantName: tenant?.username ?? null,
+    }));
+  };
+
+  // When status changes to free, clear tenant
+  const handleStatusChange = (status: Room["status"]) => {
+    if (status !== "occupied") {
+      setForm((f) => ({ ...f, status, currentTenantId: null, currentTenantName: null }));
+    } else {
+      setForm((f) => ({ ...f, status }));
+    }
   };
 
   const handleSave = async () => {
@@ -112,7 +155,6 @@ export default function HabitacionesPage() {
     const roomSnap = await getDoc(doc(db, "rooms", room.id));
     const currentEnabled = roomSnap.exists() ? roomSnap.data().enabled !== false : true;
     const newEnabled = !currentEnabled;
-
     await updateDoc(doc(db, "rooms", room.id), { enabled: newEnabled, updatedAt: Timestamp.now() });
 
     const propRef = doc(db, "properties", room.propertyId);
@@ -154,6 +196,8 @@ export default function HabitacionesPage() {
     pending_payment: `Pago pendiente (${counts.pending_payment})`,
     disabled: `Inhabilitadas (${counts.disabled})`,
   };
+
+  const tenantsForEditRoom = editRoom ? (tenantsByProperty[editRoom.propertyId] ?? []) : [];
 
   return (
     <div className="max-w-[1400px] space-y-6">
@@ -246,7 +290,7 @@ export default function HabitacionesPage() {
                         ? <Badge variant="gray">Inhabilitada</Badge>
                         : <Badge variant={sb.variant} dot>{sb.label}</Badge>}
                     </td>
-                    <td className="px-2 py-4 relative">
+                    <td className="px-2 py-4 relative" style={{opacity: 1}}>
                       <button onClick={() => setMenuOpen(menuOpen === room.id ? null : room.id)}
                         className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
                         <MoreHorizontal className="w-4 h-4" />
@@ -275,6 +319,7 @@ export default function HabitacionesPage() {
         </div>
       )}
 
+      {/* Edit Modal */}
       <Modal open={!!editRoom} onClose={() => setEditRoom(null)} title="Editar habitación">
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
@@ -296,12 +341,46 @@ export default function HabitacionesPage() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Estado</label>
             <select className="input-field appearance-none cursor-pointer" value={form.status ?? "free"}
-              onChange={(e) => setForm({ ...form, status: e.target.value as Room["status"] })}>
+              onChange={(e) => handleStatusChange(e.target.value as Room["status"])}>
               <option value="free">Libre</option>
               <option value="occupied">Ocupada</option>
               <option value="pending_payment">Pago pendiente</option>
             </select>
           </div>
+
+          {/* Inquilino — solo visible cuando estado es "occupied" */}
+          {form.status === "occupied" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                <span className="flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-gray-400" />
+                  Inquilino
+                </span>
+              </label>
+              {tenantsForEditRoom.length === 0 ? (
+                <div className="input-field text-gray-400 text-sm bg-gray-50 cursor-not-allowed">
+                  Sin inquilinos registrados en este piso
+                </div>
+              ) : (
+                <select
+                  className="input-field appearance-none cursor-pointer"
+                  value={form.currentTenantId ?? ""}
+                  onChange={(e) => handleTenantChange(e.target.value)}
+                >
+                  <option value="">Sin asignar</option>
+                  {tenantsForEditRoom.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.username} — {t.email}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <p className="text-xs text-gray-400 mt-1">
+                Solo aparecen inquilinos registrados en este piso desde la app móvil.
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Alquiler mensual (€)</label>
@@ -327,4 +406,3 @@ export default function HabitacionesPage() {
     </div>
   );
 }
-
