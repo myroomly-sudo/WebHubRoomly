@@ -90,13 +90,22 @@ export default function PagosPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Auto-fill amount when room changes
+  // Auto-fill amount and concept when room or month changes
   const selectedRoom = rooms.find((r) => r.id === createForm.roomId);
   useEffect(() => {
-    if (selectedRoom?.monthlyRent) {
-      setCreateForm((f) => ({ ...f, amount: String(selectedRoom.monthlyRent) }));
+    if (selectedRoom) {
+      const conceptDefault = [
+        `Alquiler ${createForm.month}`,
+        selectedRoom.name ? `· ${selectedRoom.name}` : "",
+        selectedRoom.currentTenantName ? `· ${selectedRoom.currentTenantName}` : "",
+      ].filter(Boolean).join(" ");
+      setCreateForm((f) => ({
+        ...f,
+        amount: selectedRoom.monthlyRent ? String(selectedRoom.monthlyRent) : f.amount,
+        concept: conceptDefault,
+      }));
     }
-  }, [createForm.roomId]);
+  }, [createForm.roomId, createForm.month]);
 
   const roomsForProperty = rooms.filter(
     (r) => r.propertyId === createForm.propertyId && r.status === "occupied"
