@@ -28,11 +28,11 @@ interface Room {
   currentTenantId?: string | null; currentTenantName?: string | null;
 }
 
-// Generate list of last 12 months for selector
+// Generate list of last 12 months for selector — chronological order (oldest → newest)
 function getMonthOptions() {
   const options: { value: string; label: string }[] = [];
   const now = new Date();
-  for (let i = 0; i < 12; i++) {
+  for (let i = 11; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     const label = d.toLocaleDateString("es-ES", { month: "long", year: "numeric" });
