@@ -51,25 +51,27 @@ function ExcelIcon({ className }: { className?: string }) {
   );
 }
 
-function escapeCSV(value: unknown): string {
+function escapeCSV(value: unknown, sep = ";"): string {
   if (value === null || value === undefined) return "";
   const str = String(value);
-  if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+  if (str.includes(sep) || str.includes('"') || str.includes("\n")) {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
 }
 
 function toCSV(columns: Column[], data: Record<string, unknown>[]): string {
-  const header = columns.map((c) => escapeCSV(c.header)).join(",");
+  // Use semicolon as separator for Excel compatibility in Spain/Europe
+  const SEP = ";";
+  const header = columns.map((c) => escapeCSV(c.header, SEP)).join(SEP);
   const rows = data.map((row) =>
     columns
       .map((c) => {
         const val = row[c.key];
         const formatted = c.formatter ? c.formatter(val) : val;
-        return escapeCSV(formatted);
+        return escapeCSV(formatted, SEP);
       })
-      .join(",")
+      .join(SEP)
   );
   return [header, ...rows].join("\n");
 }
