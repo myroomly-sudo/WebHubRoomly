@@ -18,6 +18,7 @@ import Modal from "@/components/ui/Modal";
 import EmptyState from "@/components/ui/EmptyState";
 import KpiCard from "@/components/ui/KpiCard";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import ExcelExportButton from "@/components/ui/ExcelExportButton";
 
 type StatusFilter = "all" | PaymentStatus;
 
@@ -215,7 +216,34 @@ export default function PagosPage() {
             {payments.length} pagos registrados · {formatCurrency(totalPending)} por cobrar
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          <ExcelExportButton
+            filename="pagos"
+            data={filtered.map((p) => ({
+              inquilino: p.tenantName ?? "",
+              piso: p.propertyName ?? "",
+              habitacion: p.roomName ?? (p.roomNumber ? `Hab. ${p.roomNumber}` : ""),
+              concepto: p.concept,
+              mes: p.month,
+              importe: p.amount,
+              estado: p.status === "paid" ? "Pagado" : p.status === "overdue" ? "Atrasado" : "Pendiente",
+              vencimiento: p.dueDate ? formatDate(p.dueDate) : "",
+              declarado_por_inquilino: p.tenantNotified ? "Sí" : "No",
+              nota_inquilino: p.tenantNote ?? "",
+            }))}
+            columns={[
+              { header: "Inquilino", key: "inquilino" },
+              { header: "Piso", key: "piso" },
+              { header: "Habitación", key: "habitacion" },
+              { header: "Concepto", key: "concepto" },
+              { header: "Mes", key: "mes" },
+              { header: "Importe (€)", key: "importe" },
+              { header: "Estado", key: "estado" },
+              { header: "Vencimiento", key: "vencimiento" },
+              { header: "Declarado por inquilino", key: "declarado_por_inquilino" },
+              { header: "Nota inquilino", key: "nota_inquilino" },
+            ]}
+          />
           <button
             onClick={() => setShowGenerate(true)}
             className="btn-secondary"
