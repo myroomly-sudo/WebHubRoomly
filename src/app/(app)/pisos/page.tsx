@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Building2, Plus, Search, MoreHorizontal,
-  Pencil, Trash2, Users, Copy, CheckCheck, DoorOpen, Euro, SlidersHorizontal,
+  Pencil, Trash2, Users, Copy, CheckCheck, DoorOpen, Euro,
 } from "lucide-react";
 import {
   collection, query, where, getDocs, addDoc, updateDoc,
@@ -11,11 +11,11 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import { useRouter } from "next/navigation";
 import Modal from "@/components/ui/Modal";
 import EmptyState from "@/components/ui/EmptyState";
 import Badge, { propertyStatusBadge } from "@/components/ui/Badge";
 import { generatePropertyCode, generatePropertyPassword } from "@/lib/utils";
+import ExcelExportButton from "@/components/ui/ExcelExportButton";
 
 interface Property {
   id: string;
@@ -62,7 +62,6 @@ function buildRoomConfigs(count: number, existing: RoomConfig[]): RoomConfig[] {
 
 export default function PisosPage() {
   const { agencyId } = useAuth();
-  const router = useRouter();
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -72,7 +71,6 @@ export default function PisosPage() {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(DEFAULT_FORM);
-  const [userCountMap, setUserCountMap] = useState<Record<string, number>>({});
   const [roomConfigs, setRoomConfigs] = useState<RoomConfig[]>([]);
 
   const load = async () => {
@@ -80,31 +78,15 @@ export default function PisosPage() {
     const snap = await getDocs(
       query(collection(db, "properties"), where("agencyId", "==", agencyId))
     );
-    const props = snap.docs
+    setProperties(
+      snap.docs
         .map((d) => ({ id: d.id, ...d.data() } as Property))
         .sort((a, b) => {
           const aT = (a.createdAt as any)?.toDate?.()?.getTime() ?? 0;
           const bT = (b.createdAt as any)?.toDate?.()?.getTime() ?? 0;
           return bT - aT;
-        });
-    setProperties(props);
-
-    // Count users per property from the users collection
-    const propIds = props.map((p) => p.id);
-    const countMap: Record<string, number> = {};
-    if (propIds.length) {
-      for (let i = 0; i < propIds.length; i += 10) {
-        const chunk = propIds.slice(i, i + 10);
-        const usersSnap = await getDocs(
-          query(collection(db, "users"), where("propertyId", "in", chunk))
-        );
-        usersSnap.docs.forEach((d) => {
-          const pid = d.data().propertyId;
-          countMap[pid] = (countMap[pid] ?? 0) + 1;
-        });
-      }
-    }
-    setUserCountMap(countMap);
+        })
+    );
     setLoading(false);
   };
 
@@ -252,9 +234,34 @@ export default function PisosPage() {
           <h2 className="text-xl font-bold text-roomly-charcoal">Pisos</h2>
           <p className="text-sm text-gray-400 mt-0.5">{properties.length} propiedades registradas</p>
         </div>
-        <button onClick={openCreate} className="btn-primary">
-          <Plus className="w-4 h-4" /> Nuevo piso
-        </button>
+        <div className="flex items-center gap-2">
+          <ExcelExportButton
+            filename="pisos"
+            data={filtered.map((p) => ({
+              nombre: p.name,
+              direccion: p.address,
+              ciudad: p.city,
+              codigo: p.propertyCode,
+              contrasena: p.propertyPassword,
+              inquilinos: `${userCountMap[p.id] ?? 0}/${p.maxUsers}`,
+              habitaciones: p.roomCount ?? 0,
+              estado: p.status === "active" ? "Activo" : "Inactivo",
+            }))}
+            columns={[
+              { header: "Nombre", key: "nombre" },
+              { header: "Dirección", key: "direccion" },
+              { header: "Ciudad", key: "ciudad" },
+              { header: "Código", key: "codigo" },
+              { header: "Contraseña", key: "contrasena" },
+              { header: "Inquilinos", key: "inquilinos" },
+              { header: "Habitaciones", key: "habitaciones" },
+              { header: "Estado", key: "estado" },
+            ]}
+          />
+          <button onClick={openCreate} className="btn-primary">
+            <Plus className="w-4 h-4" /> Nuevo piso
+          </button>
+        </div>
       </div>
 
       <div className="relative max-w-sm">
@@ -320,7 +327,7 @@ export default function PisosPage() {
                     </td>
                     <td className="px-5 py-4 hidden md:table-cell">
                       <div className="flex items-center gap-3 text-gray-600 text-xs">
-                        <div className="flex items-center gap-1"><Users className="w-3.5 h-3.5 text-gray-400" />{userCountMap[p.id] ?? 0}/{p.maxUsers}</div>
+                        <div className="flex items-center gap-1"><Users className="w-3.5 h-3.5 text-gray-400" />{p.currentUsers}/{p.maxUsers}</div>
                         <div className="flex items-center gap-1"><DoorOpen className="w-3.5 h-3.5 text-gray-400" />{p.roomCount ?? "—"}</div>
                       </div>
                     </td>
@@ -334,15 +341,6 @@ export default function PisosPage() {
                         <div className="absolute right-4 top-12 bg-white border border-gray-200 rounded-xl shadow-lg z-20 min-w-[160px] py-1.5 text-sm">
                           <button onClick={() => openEdit(p)} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
                             <Pencil className="w-3.5 h-3.5" /> Editar
-                          </button>
-                          <button
-                            onClick={() => {
-                              setMenuOpen(null);
-                              router.push(`/habitaciones?piso=${p.id}`);
-                            }}
-                            className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700"
-                          >
-                            <SlidersHorizontal className="w-3.5 h-3.5" /> Gestionar habitaciones
                           </button>
                           <button onClick={() => handleToggleStatus(p)} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
                             <Building2 className="w-3.5 h-3.5" />{p.status === "active" ? "Desactivar" : "Activar"}
