@@ -141,8 +141,15 @@ export default function Header() {
 
   const markAsRead = async (notif: HubNotification) => {
     await updateDoc(doc(db, "hubNotifications", notif.id), { read: true });
-    if (notif.type === "new_user") router.push("/usuarios");
-    else if (notif.type === "new_incident") router.push("/incidencias");
+    if (notif.type === "new_user") {
+      // If notification has targetId (uid), go to habitaciones filtered for that property
+      // so the agency can assign the room directly
+      if (notif.targetId && notif.propertyId) {
+        router.push(`/habitaciones?piso=${notif.propertyId}&asignar=${notif.targetId}`);
+      } else {
+        router.push("/usuarios");
+      }
+    } else if (notif.type === "new_incident") router.push("/incidencias");
     setOpen(false);
   };
 
@@ -309,4 +316,6 @@ export default function Header() {
     </header>
   );
 }
+
+
 
