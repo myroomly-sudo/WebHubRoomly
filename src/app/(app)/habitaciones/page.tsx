@@ -1,21 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   DoorOpen, Search, Filter, MoreHorizontal, Pencil,
-  ToggleLeft, ToggleRight, User,
+  ToggleLeft, ToggleRight, User, UserX,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import {
-  collection, query, where, getDocs, updateDoc,
-  doc, Timestamp, getDoc,
+  collection, query, where, onSnapshot, updateDoc, runTransaction,
+  doc, serverTimestamp, getDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import Badge, { roomStatusBadge } from "@/components/ui/Badge";
 import Modal from "@/components/ui/Modal";
 import EmptyState from "@/components/ui/EmptyState";
-import { formatCurrency, cn } from "@/lib/utils";
 import ExcelExportButton from "@/components/ui/ExcelExportButton";
+import { formatCurrency } from "@/lib/utils";
 
 interface Room {
   id: string;
@@ -51,6 +52,7 @@ type RoomStatusFilter = "all" | "occupied" | "free" | "pending_payment" | "disab
 
 export default function HabitacionesPage() {
   const { agencyId } = useAuth();
+  const searchParams = useSearchParams();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [tenantsByProperty, setTenantsByProperty] = useState<Record<string, Tenant[]>>({});
@@ -63,46 +65,73 @@ export default function HabitacionesPage() {
   const [form, setForm] = useState<Partial<Room>>({});
   const [saving, setSaving] = useState(false);
 
-  const load = async () => {
-    if (!agencyId) return;
-    const propsSnap = await getDocs(
-      query(collection(db, "properties"), where("agencyId", "==", agencyId))
-    );
-    const props = propsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Property));
-    setProperties(props);
+  // ── Tenants loader (getDocs, not realtime) ──────────────────────
+  const loadTenantsAndProps = useCallback(async (propIds: string[]) => {
+    if (!propIds.length) return;
 
-    const propertyIds = props.map((p) => p.id);
-    if (!propertyIds.length) { setLoading(false); return; }
+    // Properties
+    // (already loaded via onSnapshot above, but we need them for tenant lookup)
 
-    // Load rooms
-    const allRooms: Room[] = [];
-    for (let i = 0; i < propertyIds.length; i += 10) {
-      const chunk = propertyIds.slice(i, i + 10);
-      const snap = await getDocs(query(collection(db, "rooms"), where("propertyId", "in", chunk)));
-      snap.docs.forEach((d) => { const data = d.data(); allRooms.push({ id: d.id, ...data, enabled: data.enabled !== false } as Room); });
-    }
-    allRooms.sort((a, b) => {
-      if (a.propertyId !== b.propertyId) return a.propertyId.localeCompare(b.propertyId);
-      return Number(a.number) - Number(b.number);
-    });
-    setRooms(allRooms);
-
-    // Load tenants grouped by property
-    const tenantsMap: Record<string, Tenant[]> = {};
-    for (let i = 0; i < propertyIds.length; i += 10) {
-      const chunk = propertyIds.slice(i, i + 10);
-      const snap = await getDocs(query(collection(db, "users"), where("propertyId", "in", chunk)));
-      snap.docs.forEach((d) => {
+    // Tenants grouped by property
+    const map: Record<string, Tenant[]> = {};
+    for (let i = 0; i < propIds.length; i += 10) {
+      const chunk = propIds.slice(i, i + 10);
+      const snap = await new Promise<any>((res) => {
+        const q = query(collection(db, "users"), where("propertyId", "in", chunk));
+        import("firebase/firestore").then(({ getDocs }) => getDocs(q).then(res));
+      });
+      snap.docs.forEach((d: any) => {
         const t = { id: d.id, ...d.data() } as Tenant;
-        if (!tenantsMap[t.propertyId]) tenantsMap[t.propertyId] = [];
-        tenantsMap[t.propertyId].push(t);
+        if (!map[t.propertyId]) map[t.propertyId] = [];
+        map[t.propertyId].push(t);
       });
     }
-    setTenantsByProperty(tenantsMap);
-    setLoading(false);
-  };
+    setTenantsByProperty(map);
+  }, []);
 
-  useEffect(() => { load(); }, [agencyId]);
+  // ── Real-time listener for properties ──────────────────────────
+  useEffect(() => {
+    if (!agencyId) return;
+    const q = query(collection(db, "properties"), where("agencyId", "==", agencyId));
+    const unsub = onSnapshot(q, (snap) => {
+      const props = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Property));
+      setProperties(props);
+      loadTenantsAndProps(props.map((p) => p.id));
+    });
+    return unsub;
+  }, [agencyId, loadTenantsAndProps]);
+
+  // ── Real-time listener for rooms ───────────────────────────────
+  useEffect(() => {
+    if (!agencyId || !properties.length) return;
+    const propIds = properties.map((p) => p.id);
+    const unsubs: (() => void)[] = [];
+    const roomMap = new Map<string, Room>();
+
+    for (let i = 0; i < propIds.length; i += 10) {
+      const chunk = propIds.slice(i, i + 10);
+      const q = query(collection(db, "rooms"), where("propertyId", "in", chunk));
+      const unsub = onSnapshot(q, (snap) => {
+        snap.docs.forEach((d) => {
+          const data = d.data();
+          roomMap.set(d.id, { id: d.id, ...data, enabled: data.enabled !== false } as Room);
+        });
+        snap.docChanges().forEach((change) => {
+          if (change.type === "removed") roomMap.delete(change.doc.id);
+        });
+        const sorted = Array.from(roomMap.values()).sort((a, b) => {
+          if (a.propertyId !== b.propertyId) return a.propertyId.localeCompare(b.propertyId);
+          return Number(a.number) - Number(b.number);
+        });
+        setRooms(sorted);
+        setLoading(false);
+      });
+      unsubs.push(unsub);
+    }
+
+    if (!propIds.length) setLoading(false);
+    return () => unsubs.forEach((u) => u());
+  }, [agencyId, properties]);
 
   const propertyName = (id: string) => properties.find((p) => p.id === id)?.name ?? "—";
 
@@ -121,7 +150,6 @@ export default function HabitacionesPage() {
     setMenuOpen(null);
   };
 
-  // When tenant selection changes, auto-fill name
   const handleTenantChange = (tenantId: string) => {
     const propertyId = editRoom?.propertyId ?? "";
     const tenant = tenantsByProperty[propertyId]?.find((t) => t.id === tenantId);
@@ -132,7 +160,6 @@ export default function HabitacionesPage() {
     }));
   };
 
-  // When status changes to free, clear tenant
   const handleStatusChange = (status: Room["status"]) => {
     if (status !== "occupied") {
       setForm((f) => ({ ...f, status, currentTenantId: null, currentTenantName: null }));
@@ -141,22 +168,77 @@ export default function HabitacionesPage() {
     }
   };
 
+  // ── Save via transaction to avoid race conditions ───────────────
   const handleSave = async () => {
     if (!editRoom) return;
     setSaving(true);
     try {
-      await updateDoc(doc(db, "rooms", editRoom.id), { ...form, updatedAt: Timestamp.now() });
+      const roomRef = doc(db, "rooms", editRoom.id);
+      if (form.status === "occupied" && form.currentTenantId) {
+        // Use transaction to guarantee atomicity
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(roomRef);
+          const current = snap.data();
+          // If room was already taken by someone else, abort
+          if (
+            current?.status === "occupied" &&
+            current?.currentTenantId !== editRoom.currentTenantId &&
+            current?.currentTenantId !== form.currentTenantId
+          ) {
+            throw new Error("La habitación acaba de ser ocupada por otro inquilino.");
+          }
+          tx.update(roomRef, {
+            name: form.name,
+            number: form.number,
+            description: form.description ?? "",
+            status: "occupied",
+            currentTenantId: form.currentTenantId,
+            currentTenantName: form.currentTenantName,
+            monthlyRent: form.monthlyRent,
+            floor: form.floor,
+            updatedAt: serverTimestamp(),
+          });
+        });
+      } else {
+        await updateDoc(roomRef, {
+          name: form.name,
+          number: form.number,
+          description: form.description ?? "",
+          status: form.status ?? "free",
+          currentTenantId: null,
+          currentTenantName: null,
+          monthlyRent: form.monthlyRent,
+          floor: form.floor,
+          updatedAt: serverTimestamp(),
+        });
+      }
       setEditRoom(null);
-      await load();
-    } finally { setSaving(false); }
+    } catch (e: any) {
+      alert(e.message ?? "Error al guardar.");
+    } finally {
+      setSaving(false);
+    }
   };
 
+  // ── Release room ────────────────────────────────────────────────
+  const handleReleaseRoom = async (room: Room) => {
+    if (!confirm(`¿Liberar la habitación "${room.name}"? Se desvinculará el inquilino actual.`)) return;
+    setMenuOpen(null);
+    await updateDoc(doc(db, "rooms", room.id), {
+      status: "free",
+      currentTenantId: null,
+      currentTenantName: null,
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  // ── Toggle enabled ──────────────────────────────────────────────
   const toggleRoomEnabled = async (room: Room) => {
     setMenuOpen(null);
     const roomSnap = await getDoc(doc(db, "rooms", room.id));
     const currentEnabled = roomSnap.exists() ? roomSnap.data().enabled !== false : true;
     const newEnabled = !currentEnabled;
-    await updateDoc(doc(db, "rooms", room.id), { enabled: newEnabled, updatedAt: Timestamp.now() });
+    await updateDoc(doc(db, "rooms", room.id), { enabled: newEnabled, updatedAt: serverTimestamp() });
 
     const propRef = doc(db, "properties", room.propertyId);
     const propSnap = await getDoc(propRef);
@@ -165,9 +247,8 @@ export default function HabitacionesPage() {
         .filter((r) => r.propertyId === room.propertyId)
         .map((r) => (r.id === room.id ? { ...r, enabled: newEnabled } : r));
       const enabledCount = updatedRooms.filter((r) => r.enabled).length;
-      await updateDoc(propRef, { maxUsers: enabledCount, updatedAt: Timestamp.now() });
+      await updateDoc(propRef, { maxUsers: enabledCount, updatedAt: serverTimestamp() });
     }
-    await load();
   };
 
   const filtered = rooms.filter((r) => {
@@ -198,7 +279,38 @@ export default function HabitacionesPage() {
     disabled: `Inhabilitadas (${counts.disabled})`,
   };
 
+  // Auto-apply filters and open assign modal from URL params
+  useEffect(() => {
+    const pisoParam = searchParams.get("piso");
+    const asignarParam = searchParams.get("asignar");
+    if (pisoParam) setPropertyFilter(pisoParam);
+    if (asignarParam && pisoParam && rooms.length && Object.keys(tenantsByProperty).length) {
+      // Find a free room in this property to open edit modal pre-filled for this tenant
+      const freeRoom = rooms.find((r) => r.propertyId === pisoParam && r.status === "free" && r.enabled);
+      const tenant = tenantsByProperty[pisoParam]?.find((t) => t.id === asignarParam);
+      if (freeRoom && tenant) {
+        setEditRoom(freeRoom);
+        setForm({
+          name: freeRoom.name,
+          number: freeRoom.number,
+          status: "occupied",
+          monthlyRent: freeRoom.monthlyRent,
+          floor: freeRoom.floor,
+          description: freeRoom.description ?? "",
+          currentTenantId: tenant.id,
+          currentTenantName: tenant.username,
+        });
+      }
+    }
+  }, [searchParams, rooms, tenantsByProperty]);
+
   const tenantsForEditRoom = editRoom ? (tenantsByProperty[editRoom.propertyId] ?? []) : [];
+  // Tenants not currently assigned to any room in this property
+  const occupiedTenantIds = new Set(
+    rooms.filter((r) => r.propertyId === editRoom?.propertyId && r.status === "occupied" && r.id !== editRoom?.id)
+      .map((r) => r.currentTenantId).filter(Boolean)
+  );
+  const availableTenants = tenantsForEditRoom.filter((t) => !occupiedTenantIds.has(t.id));
 
   return (
     <div className="max-w-[1400px] space-y-6">
@@ -234,6 +346,7 @@ export default function HabitacionesPage() {
         />
       </div>
 
+      {/* Status tabs */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit overflow-x-auto">
         {(Object.keys(TAB_LABELS) as RoomStatusFilter[]).map((key) => (
           <button key={key} onClick={() => setStatusFilter(key)}
@@ -245,6 +358,7 @@ export default function HabitacionesPage() {
         ))}
       </div>
 
+      {/* Filters */}
       <div className="flex gap-3 flex-wrap">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -261,6 +375,54 @@ export default function HabitacionesPage() {
         </div>
       </div>
 
+      {/* Inquilinos sin habitación — per property */}
+      {propertyFilter !== "all" && (() => {
+        const propTenants = tenantsByProperty[propertyFilter] ?? [];
+        const occupiedIds = new Set(rooms.filter(r => r.propertyId === propertyFilter && r.status === "occupied").map(r => r.currentTenantId).filter(Boolean));
+        const unassigned = propTenants.filter(t => !occupiedIds.has(t.id));
+        if (!unassigned.length) return null;
+        const freeRooms = rooms.filter(r => r.propertyId === propertyFilter && r.status === "free" && r.enabled);
+        return (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+            <p className="text-sm font-semibold text-amber-800 mb-3">
+              ⚠ {unassigned.length} inquilino{unassigned.length > 1 ? "s" : ""} sin habitación asignada
+            </p>
+            <div className="space-y-2">
+              {unassigned.map((t) => (
+                <div key={t.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-2.5">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">{t.username}</p>
+                    <p className="text-xs text-gray-400">{t.email}</p>
+                  </div>
+                  <button
+                    disabled={!freeRooms.length}
+                    onClick={() => {
+                      const freeRoom = freeRooms[0];
+                      if (!freeRoom) return;
+                      setEditRoom(freeRoom);
+                      setForm({
+                        name: freeRoom.name,
+                        number: freeRoom.number,
+                        status: "occupied",
+                        monthlyRent: freeRoom.monthlyRent,
+                        floor: freeRoom.floor,
+                        description: freeRoom.description ?? "",
+                        currentTenantId: t.id,
+                        currentTenantName: t.username,
+                      });
+                    }}
+                    className="text-xs font-semibold text-roomly-navy bg-roomly-navy/10 px-3 py-1.5 rounded-lg hover:bg-roomly-navy/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {freeRooms.length ? "Asignar habitación" : "Sin hab. libres"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Table */}
       {loading ? (
         <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-16 bg-gray-100 rounded-xl animate-pulse" />)}</div>
       ) : filtered.length === 0 ? (
@@ -326,6 +488,11 @@ export default function HabitacionesPage() {
                               <Pencil className="w-3.5 h-3.5" /> Editar
                             </button>
                           )}
+                          {!isDisabled && room.status === "occupied" && (
+                            <button onClick={() => handleReleaseRoom(room)} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-amber-50 text-amber-600">
+                              <UserX className="w-3.5 h-3.5" /> Liberar habitación
+                            </button>
+                          )}
                           <button onClick={() => toggleRoomEnabled(room)}
                             className={`w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 ${isDisabled ? "text-emerald-600" : "text-red-500"}`}>
                             {isDisabled
@@ -372,7 +539,7 @@ export default function HabitacionesPage() {
             </select>
           </div>
 
-          {/* Inquilino — solo visible cuando estado es "occupied" */}
+          {/* Inquilino — solo cuando estado es "occupied" */}
           {form.status === "occupied" && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
@@ -381,9 +548,9 @@ export default function HabitacionesPage() {
                   Inquilino
                 </span>
               </label>
-              {tenantsForEditRoom.length === 0 ? (
+              {availableTenants.length === 0 && !form.currentTenantId ? (
                 <div className="input-field text-gray-400 text-sm bg-gray-50 cursor-not-allowed">
-                  Sin inquilinos registrados en este piso
+                  Todos los inquilinos del piso ya tienen habitación asignada
                 </div>
               ) : (
                 <select
@@ -392,7 +559,11 @@ export default function HabitacionesPage() {
                   onChange={(e) => handleTenantChange(e.target.value)}
                 >
                   <option value="">Sin asignar</option>
-                  {tenantsForEditRoom.map((t) => (
+                  {/* Show current tenant even if already assigned elsewhere */}
+                  {form.currentTenantId && !availableTenants.find(t => t.id === form.currentTenantId) && (
+                    <option value={form.currentTenantId}>{form.currentTenantName ?? form.currentTenantId}</option>
+                  )}
+                  {availableTenants.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.username} — {t.email}
                     </option>
@@ -400,7 +571,7 @@ export default function HabitacionesPage() {
                 </select>
               )}
               <p className="text-xs text-gray-400 mt-1">
-                Solo aparecen inquilinos registrados en este piso desde la app móvil.
+                Solo aparecen inquilinos sin habitación asignada en este piso.
               </p>
             </div>
           )}
@@ -430,3 +601,4 @@ export default function HabitacionesPage() {
     </div>
   );
 }
+
