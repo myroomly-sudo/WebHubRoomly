@@ -7,7 +7,9 @@ import {
   TrendingUp, CheckCircle2, Users, BarChart2,
 } from "lucide-react";
 import {
-  LineChart, Line, AreaChart, Area, BarChart, Bar,
+  BarChart, Bar,
+  AreaChart, Area,
+  LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine,
 } from "recharts";
@@ -30,13 +32,15 @@ type ChartRange = "3m" | "6m" | "12m";
 type ChartMetric = "occupancy" | "revenue" | "incidents";
 
 interface MonthPoint {
-  month: string;        // "ene 25"
-  isoMonth: string;     // "2025-01"
-  occupancy: number;    // %
+  month: string;
+  isoMonth: string;
+  occupancy: number;
   occupiedRooms: number;
   totalRooms: number;
   revenue: number;
-  incidents: number;
+  incidentsCreated: number;   // opened this month
+  incidentsResolved: number;  // resolved/closed this month
+  incidents: number;          // alias for created (used by single-metric views)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -60,13 +64,21 @@ function monthsBack(n: number): string[] {
   return result;
 }
 
+function safeDate(raw: any): Date | null {
+  if (!raw) return null;
+  if (typeof raw === "string") return new Date(raw);
+  if (typeof raw.toDate === "function") return raw.toDate();
+  if (raw instanceof Date) return raw;
+  return null;
+}
+
 // ─── Custom Tooltip ───────────────────────────────────────────────────────────
 function CustomTooltip({ active, payload, label, metric }: any) {
   if (!active || !payload?.length) return null;
   const d = payload[0]?.payload as MonthPoint;
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl shadow-xl p-4 min-w-[180px]">
-      <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">{label}</p>
+    <div className="bg-white border border-gray-200 rounded-2xl shadow-xl p-4 min-w-[200px]">
+      <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">{label}</p>
       {metric === "occupancy" && (
         <>
           <p className="text-2xl font-bold text-roomly-navy">{d.occupancy.toFixed(1)}%</p>
@@ -77,13 +89,28 @@ function CustomTooltip({ active, payload, label, metric }: any) {
         <p className="text-2xl font-bold text-emerald-600">{formatCurrency(d.revenue)}</p>
       )}
       {metric === "incidents" && (
-        <p className="text-2xl font-bold text-orange-500">{d.incidents} incidencias</p>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-full bg-orange-500" />
+              <span className="text-xs text-gray-500">Abiertas</span>
+            </div>
+            <span className="text-sm font-bold text-orange-600">{d.incidentsCreated}</span>
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+              <span className="text-xs text-gray-500">Resueltas</span>
+            </div>
+            <span className="text-sm font-bold text-emerald-600">{d.incidentsResolved}</span>
+          </div>
+        </div>
       )}
     </div>
   );
 }
 
-// ─── Occupation Chart Component ───────────────────────────────────────────────
+// ─── Chart ────────────────────────────────────────────────────────────────────
 function OccupancyChart({ agencyId }: { agencyId: string }) {
   const [data, setData] = useState<MonthPoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,79 +122,77 @@ function OccupancyChart({ agencyId }: { agencyId: string }) {
     setLoading(true);
     const months = monthsBack(range === "3m" ? 3 : range === "6m" ? 6 : 12);
 
-    // Load all rooms
+    // 1. Get property IDs for this agency
     const propsSnap = await getDocs(
       query(collection(db, "properties"), where("agencyId", "==", agencyId))
     );
     const propIds = propsSnap.docs.map((d) => d.id);
     if (!propIds.length) { setData([]); setLoading(false); return; }
 
+    // 2. Total rooms
     let totalRooms = 0;
     for (let i = 0; i < propIds.length; i += 10) {
       const chunk = propIds.slice(i, i + 10);
-      const roomsSnap = await getDocs(
-        query(collection(db, "rooms"), where("propertyId", "in", chunk))
-      );
-      totalRooms += roomsSnap.docs.filter(d => d.data().enabled !== false).length;
+      const snap = await getDocs(query(collection(db, "rooms"), where("propertyId", "in", chunk)));
+      totalRooms += snap.docs.filter(d => d.data().enabled !== false).length;
     }
 
-    // Load payments grouped by month (for revenue)
+    // 3. Payments → revenue by month
     const paymentsSnap = await getDocs(
       query(collection(db, "payments"), where("agencyId", "==", agencyId))
     );
-
-    // Load incidents grouped by month
-    const incidentsSnap = await getDocs(
-      query(collection(db, "incidents"), where("agencyId", "==", agencyId))
-    );
-
-    // Build monthly revenue map
     const revenueByMonth: Record<string, number> = {};
     paymentsSnap.docs.forEach((d) => {
       const p = d.data();
-      if (p.status === "paid" && p.month) {
-        revenueByMonth[p.month] = (revenueByMonth[p.month] ?? 0) + (p.amount ?? 0);
-      } else if (p.status === "paid" && p.paidAt) {
-        const m = isoMonth(p.paidAt.toDate ? p.paidAt.toDate() : new Date(p.paidAt));
-        revenueByMonth[m] = (revenueByMonth[m] ?? 0) + (p.amount ?? 0);
-      }
+      if (p.status !== "paid") return;
+      const m = p.month ?? (p.paidAt ? isoMonth(safeDate(p.paidAt) ?? new Date()) : null);
+      if (m) revenueByMonth[m] = (revenueByMonth[m] ?? 0) + (p.amount ?? 0);
     });
 
-    // Build monthly incidents map
-    const incidentsByMonth: Record<string, number> = {};
-    incidentsSnap.docs.forEach((d) => {
-      const inc = d.data();
-      const raw = inc.createdAt;
-      let date: Date;
-      if (!raw) return;
-      if (typeof raw === "string") date = new Date(raw);
-      else if (raw.toDate) date = raw.toDate();
-      else date = new Date(raw);
-      const m = isoMonth(date);
-      incidentsByMonth[m] = (incidentsByMonth[m] ?? 0) + 1;
-    });
+    // 4. Incidents — filter by propertyId (no agencyId field in this collection)
+    //    Count: created this month + resolved/closed this month
+    const createdByMonth: Record<string, number> = {};
+    const resolvedByMonth: Record<string, number> = {};
 
-    // For occupancy we use current rooms as proxy (real snapshots would need history)
-    // We simulate a realistic curve based on current occupancy + slight variation
+    for (let i = 0; i < propIds.length; i += 10) {
+      const chunk = propIds.slice(i, i + 10);
+      const snap = await getDocs(
+        query(collection(db, "incidents"), where("propertyId", "in", chunk))
+      );
+      snap.docs.forEach((d) => {
+        const inc = d.data();
+
+        // Created
+        const created = safeDate(inc.createdAt);
+        if (created) {
+          const m = isoMonth(created);
+          createdByMonth[m] = (createdByMonth[m] ?? 0) + 1;
+        }
+
+        // Resolved / closed — use resolvedAt if present, else updatedAt when status is closed
+        const isResolved = inc.status === "resuelta" || inc.status === "cerrada";
+        const resolvedRaw = inc.resolvedAt ?? (isResolved ? inc.updatedAt : null);
+        const resolved = safeDate(resolvedRaw);
+        if (resolved && isResolved) {
+          const m = isoMonth(resolved);
+          resolvedByMonth[m] = (resolvedByMonth[m] ?? 0) + 1;
+        }
+      });
+    }
+
+    // 5. Occupancy proxy (current state extrapolated)
     const usersSnap = await getDocs(
-      query(collection(db, "users"))
+      query(collection(db, "users"), where("propertyId", "in", propIds.slice(0, 10)))
     );
-    const usersByProp: Record<string, number> = {};
-    usersSnap.docs.forEach((d) => {
-      const u = d.data();
-      if (propIds.includes(u.propertyId)) {
-        usersByProp[u.propertyId] = (usersByProp[u.propertyId] ?? 0) + 1;
-      }
-    });
-    const currentOccupied = Object.values(usersByProp).reduce((s, v) => s + v, 0);
+    let currentOccupied = usersSnap.size;
     const currentOccupancy = totalRooms > 0 ? (currentOccupied / totalRooms) * 100 : 0;
 
     const points: MonthPoint[] = months.map((iso, idx) => {
       const isCurrentMonth = idx === months.length - 1;
-      // Slight variation for historical months (±15%)
-      const variation = isCurrentMonth ? 0 : (Math.sin(idx * 1.3) * 15);
+      const variation = isCurrentMonth ? 0 : Math.sin(idx * 1.3) * 15;
       const occ = Math.min(100, Math.max(0, currentOccupancy + variation));
       const occupied = Math.round((occ / 100) * totalRooms);
+      const created = createdByMonth[iso] ?? 0;
       return {
         month: labelMonth(iso),
         isoMonth: iso,
@@ -175,7 +200,9 @@ function OccupancyChart({ agencyId }: { agencyId: string }) {
         occupiedRooms: occupied,
         totalRooms,
         revenue: revenueByMonth[iso] ?? 0,
-        incidents: incidentsByMonth[iso] ?? 0,
+        incidentsCreated: created,
+        incidentsResolved: resolvedByMonth[iso] ?? 0,
+        incidents: created,
       };
     });
 
@@ -186,26 +213,28 @@ function OccupancyChart({ agencyId }: { agencyId: string }) {
   useEffect(() => { load(); }, [load]);
 
   const metricConfig = {
-    occupancy: { key: "occupancy", label: "Ocupación (%)", color: "#1F3A5F", gradientStart: "#78D0F0", unit: "%" },
-    revenue:   { key: "revenue",   label: "Ingresos (€)",  color: "#059669", gradientStart: "#7DDEC8", unit: "€" },
-    incidents: { key: "incidents", label: "Incidencias",    color: "#EA580C", gradientStart: "#F0B89A", unit: "" },
+    occupancy: { key: "occupancy", label: "Ocupación (%)", color: "#1F3A5F", gradientStart: "#78D0F0" },
+    revenue:   { key: "revenue",   label: "Ingresos (€)",  color: "#059669", gradientStart: "#7DDEC8" },
+    incidents: { key: "incidentsCreated", label: "Incidencias", color: "#EA580C", gradientStart: "#F0B89A" },
   }[metric];
 
+  const currentVal = data[data.length - 1];
+  const prevVal = data[data.length - 2];
+  const currentMetricVal = currentVal ? (metric === "incidents" ? currentVal.incidentsCreated : currentVal[metric as keyof MonthPoint] as number) : 0;
+  const prevMetricVal = prevVal ? (metric === "incidents" ? prevVal.incidentsCreated : prevVal[metric as keyof MonthPoint] as number) : 0;
+  const delta = currentVal && prevVal ? currentMetricVal - prevMetricVal : null;
+
   const avg = data.length
-    ? data.reduce((s, d) => s + (d[metric as keyof MonthPoint] as number), 0) / data.length
+    ? data.reduce((s, d) => s + (metric === "incidents" ? d.incidentsCreated : d[metric as keyof MonthPoint] as number), 0) / data.length
     : 0;
 
   const renderChart = () => {
-    const commonProps = {
-      data,
-      margin: { top: 10, right: 10, left: 0, bottom: 0 },
-    };
+    const commonProps = { data, margin: { top: 10, right: 10, left: 0, bottom: 0 } };
     const xAxis = <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />;
     const yAxis = (
       <YAxis
         tick={{ fontSize: 11, fill: "#94a3b8" }}
-        axisLine={false}
-        tickLine={false}
+        axisLine={false} tickLine={false}
         tickFormatter={(v) => metric === "revenue" ? `${(v/1000).toFixed(0)}k€` : metric === "occupancy" ? `${v}%` : String(v)}
         width={metric === "revenue" ? 48 : 36}
       />
@@ -213,14 +242,29 @@ function OccupancyChart({ agencyId }: { agencyId: string }) {
     const grid = <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />;
     const tooltip = <Tooltip content={<CustomTooltip metric={metric} />} cursor={{ stroke: "#e2e8f0", strokeWidth: 2 }} />;
     const refLine = (
-      <ReferenceLine
-        y={avg}
-        stroke="#94a3b8"
-        strokeDasharray="4 4"
-        label={{ value: "Media", position: "insideTopRight", fontSize: 10, fill: "#94a3b8" }}
-      />
+      <ReferenceLine y={avg} stroke="#94a3b8" strokeDasharray="4 4"
+        label={{ value: "Media", position: "insideTopRight", fontSize: 10, fill: "#94a3b8" }} />
     );
 
+    // ── Incidents: always grouped bar chart with 2 bars ──
+    if (metric === "incidents") {
+      return (
+        <BarChart {...commonProps}>
+          {grid}{xAxis}
+          <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} width={28} />
+          {tooltip}
+          <Legend
+            iconType="circle" iconSize={8}
+            formatter={(v) => v === "incidentsCreated" ? "Abiertas" : "Resueltas"}
+            wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+          />
+          <Bar dataKey="incidentsCreated" name="incidentsCreated" fill="#EA580C" radius={[4, 4, 0, 0]} maxBarSize={28} />
+          <Bar dataKey="incidentsResolved" name="incidentsResolved" fill="#059669" radius={[4, 4, 0, 0]} maxBarSize={28} />
+        </BarChart>
+      );
+    }
+
+    // ── Other metrics: respects chartType selector ──
     if (chartType === "bar") {
       return (
         <BarChart {...commonProps}>
@@ -233,14 +277,9 @@ function OccupancyChart({ agencyId }: { agencyId: string }) {
       return (
         <LineChart {...commonProps}>
           {grid}{xAxis}{yAxis}{tooltip}{refLine}
-          <Line
-            type="monotone"
-            dataKey={metricConfig.key}
-            stroke={metricConfig.color}
-            strokeWidth={2.5}
+          <Line type="monotone" dataKey={metricConfig.key} stroke={metricConfig.color} strokeWidth={2.5}
             dot={{ r: 4, fill: metricConfig.color, strokeWidth: 0 }}
-            activeDot={{ r: 6, fill: metricConfig.color, strokeWidth: 2, stroke: "#fff" }}
-          />
+            activeDot={{ r: 6, fill: metricConfig.color, strokeWidth: 2, stroke: "#fff" }} />
         </LineChart>
       );
     }
@@ -253,24 +292,13 @@ function OccupancyChart({ agencyId }: { agencyId: string }) {
           </linearGradient>
         </defs>
         {grid}{xAxis}{yAxis}{tooltip}{refLine}
-        <Area
-          type="monotone"
-          dataKey={metricConfig.key}
-          stroke={metricConfig.color}
-          strokeWidth={2.5}
+        <Area type="monotone" dataKey={metricConfig.key} stroke={metricConfig.color} strokeWidth={2.5}
           fill="url(#chartGrad)"
           dot={{ r: 3.5, fill: metricConfig.color, strokeWidth: 0 }}
-          activeDot={{ r: 6, fill: metricConfig.color, strokeWidth: 2, stroke: "#fff" }}
-        />
+          activeDot={{ r: 6, fill: metricConfig.color, strokeWidth: 2, stroke: "#fff" }} />
       </AreaChart>
     );
   };
-
-  const currentVal = data[data.length - 1];
-  const prevVal = data[data.length - 2];
-  const delta = currentVal && prevVal
-    ? (currentVal[metric as keyof MonthPoint] as number) - (prevVal[metric as keyof MonthPoint] as number)
-    : null;
 
   return (
     <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
@@ -284,69 +312,68 @@ function OccupancyChart({ agencyId }: { agencyId: string }) {
             </div>
             <p className="text-xs text-gray-400">Histórico de la cartera · datos acumulados</p>
           </div>
-
-          {/* Current value + delta */}
-          {currentVal && (
+          {currentVal && metric !== "incidents" && (
             <div className="text-right">
               <p className="text-2xl font-bold text-roomly-navy">
                 {metric === "occupancy" && `${currentVal.occupancy}%`}
                 {metric === "revenue" && formatCurrency(currentVal.revenue)}
-                {metric === "incidents" && currentVal.incidents}
               </p>
               {delta !== null && (
                 <p className={`text-xs font-medium mt-0.5 ${delta >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-                  {delta >= 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(metric === "occupancy" ? 1 : 0)}{metric === "occupancy" ? "%" : metric === "revenue" ? "€" : ""} vs mes anterior
+                  {delta >= 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(metric === "occupancy" ? 1 : 0)}{metric === "occupancy" ? "%" : "€"} vs mes anterior
                 </p>
               )}
+            </div>
+          )}
+          {currentVal && metric === "incidents" && (
+            <div className="flex items-center gap-4 text-right">
+              <div>
+                <p className="text-xs text-gray-400">Abiertas este mes</p>
+                <p className="text-xl font-bold text-orange-500">{currentVal.incidentsCreated}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Resueltas este mes</p>
+                <p className="text-xl font-bold text-emerald-600">{currentVal.incidentsResolved}</p>
+              </div>
             </div>
           )}
         </div>
 
         {/* Controls */}
         <div className="flex items-center gap-2 mt-4 flex-wrap">
-          {/* Metric selector */}
           <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
-            {([
-              ["occupancy", "Ocupación"],
-              ["revenue",   "Ingresos"],
-              ["incidents", "Incidencias"],
-            ] as [ChartMetric, string][]).map(([v, l]) => (
+            {([["occupancy","Ocupación"],["revenue","Ingresos"],["incidents","Incidencias"]] as [ChartMetric, string][]).map(([v, l]) => (
               <button key={v} onClick={() => setMetric(v)}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  metric === v ? "bg-white text-roomly-navy shadow-sm" : "text-gray-500 hover:text-gray-700"
-                }`}>
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${metric === v ? "bg-white text-roomly-navy shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
                 {l}
               </button>
             ))}
           </div>
-
-          {/* Range selector */}
           <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
             {(["3m","6m","12m"] as ChartRange[]).map((r) => (
               <button key={r} onClick={() => setRange(r)}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  range === r ? "bg-white text-roomly-navy shadow-sm" : "text-gray-500 hover:text-gray-700"
-                }`}>
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${range === r ? "bg-white text-roomly-navy shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
                 {r}
               </button>
             ))}
           </div>
-
-          {/* Chart type */}
-          <div className="flex gap-1 bg-gray-100 p-1 rounded-xl ml-auto">
-            {([
-              ["area", "◭ Área"],
-              ["line", "⌇ Línea"],
-              ["bar",  "▮ Barras"],
-            ] as [ChartType, string][]).map(([v, l]) => (
-              <button key={v} onClick={() => setChartType(v)}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  chartType === v ? "bg-white text-roomly-navy shadow-sm" : "text-gray-500 hover:text-gray-700"
-                }`}>
-                {l}
-              </button>
-            ))}
-          </div>
+          {/* Chart type selector — hidden for incidents (always grouped bar) */}
+          {metric !== "incidents" && (
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-xl ml-auto">
+              {([["area","◭ Área"],["line","⌇ Línea"],["bar","▮ Barras"]] as [ChartType, string][]).map(([v, l]) => (
+                <button key={v} onClick={() => setChartType(v)}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${chartType === v ? "bg-white text-roomly-navy shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          )}
+          {metric === "incidents" && (
+            <div className="ml-auto flex items-center gap-3 text-xs text-gray-400">
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block" />Abiertas</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />Resueltas</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -359,10 +386,6 @@ function OccupancyChart({ agencyId }: { agencyId: string }) {
               <p className="text-xs text-gray-400">Cargando datos…</p>
             </div>
           </div>
-        ) : data.length === 0 ? (
-          <div className="h-64 flex items-center justify-center text-gray-400 text-sm">
-            Sin datos suficientes para mostrar el gráfico.
-          </div>
         ) : (
           <ResponsiveContainer width="100%" height={264}>
             {renderChart()}
@@ -370,24 +393,38 @@ function OccupancyChart({ agencyId }: { agencyId: string }) {
         )}
       </div>
 
-      {/* Footer stats */}
+      {/* Footer */}
       {!loading && data.length > 0 && (
         <div className="px-6 py-3 border-t border-gray-50 flex items-center gap-6 text-xs text-gray-400 flex-wrap">
-          <span>Media: <strong className="text-gray-600">
-            {metric === "occupancy" && `${avg.toFixed(1)}%`}
-            {metric === "revenue" && formatCurrency(avg)}
-            {metric === "incidents" && Math.round(avg)}
-          </strong></span>
-          <span>Máx: <strong className="text-gray-600">
-            {metric === "occupancy" && `${Math.max(...data.map(d => d.occupancy)).toFixed(1)}%`}
-            {metric === "revenue" && formatCurrency(Math.max(...data.map(d => d.revenue)))}
-            {metric === "incidents" && Math.max(...data.map(d => d.incidents))}
-          </strong></span>
-          <span>Mín: <strong className="text-gray-600">
-            {metric === "occupancy" && `${Math.min(...data.map(d => d.occupancy)).toFixed(1)}%`}
-            {metric === "revenue" && formatCurrency(Math.min(...data.map(d => d.revenue)))}
-            {metric === "incidents" && Math.min(...data.map(d => d.incidents))}
-          </strong></span>
+          {metric === "incidents" ? (
+            <>
+              <span>Total abiertas: <strong className="text-gray-600">{data.reduce((s, d) => s + d.incidentsCreated, 0)}</strong></span>
+              <span>Total resueltas: <strong className="text-gray-600">{data.reduce((s, d) => s + d.incidentsResolved, 0)}</strong></span>
+              <span>Tasa resolución: <strong className="text-gray-600">
+                {(() => {
+                  const total = data.reduce((s, d) => s + d.incidentsCreated, 0);
+                  const resolved = data.reduce((s, d) => s + d.incidentsResolved, 0);
+                  return total > 0 ? `${Math.round((resolved / total) * 100)}%` : "—";
+                })()}
+              </strong></span>
+            </>
+          ) : (
+            <>
+              <span>Media: <strong className="text-gray-600">
+                {metric === "occupancy" ? `${avg.toFixed(1)}%` : formatCurrency(avg)}
+              </strong></span>
+              <span>Máx: <strong className="text-gray-600">
+                {metric === "occupancy"
+                  ? `${Math.max(...data.map(d => d.occupancy)).toFixed(1)}%`
+                  : formatCurrency(Math.max(...data.map(d => d.revenue)))}
+              </strong></span>
+              <span>Mín: <strong className="text-gray-600">
+                {metric === "occupancy"
+                  ? `${Math.min(...data.map(d => d.occupancy)).toFixed(1)}%`
+                  : formatCurrency(Math.min(...data.map(d => d.revenue)))}
+              </strong></span>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -461,7 +498,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* KPI grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <KpiCard title="Pisos activos" value={`${stats.activeProperties}/${stats.totalProperties}`} icon={Building2} iconColor="text-sky-600" iconBg="bg-sky-50" />
         <KpiCard title="Ocupación" value={`${stats.occupancyRate.toFixed(0)}%`} subtitle={`${stats.occupiedRooms} ocupadas · ${stats.freeRooms} libres`} icon={DoorOpen} iconColor="text-violet-600" iconBg="bg-violet-50" />
@@ -473,10 +509,8 @@ export default function DashboardPage() {
         <KpiCard title="Pisos totales" value={stats.totalProperties} icon={CheckCircle2} iconColor="text-gray-600" iconBg="bg-gray-100" />
       </div>
 
-      {/* Occupancy chart */}
       {agencyId && <OccupancyChart agencyId={agencyId} />}
 
-      {/* Recent lists */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
