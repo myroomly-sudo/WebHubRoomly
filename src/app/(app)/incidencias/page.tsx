@@ -2,9 +2,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, Search, Pencil, ImageIcon } from "lucide-react";
+import { AlertTriangle, Search, Pencil, ImageIcon, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { getIncidents, getProperties, setIncidentStatus, notifyTenantIncidentUpdate } from "@/lib/firestore";
+import { getIncidents, getProperties, setIncidentStatus, notifyTenantIncidentUpdate, deleteIncident } from "@/lib/firestore";
 import type { Incident, IncidentStatus, Property } from "@/types";
 import Badge, { incidentStatusBadge, incidentSeverityBadge } from "@/components/ui/Badge";
 import Modal from "@/components/ui/Modal";
@@ -28,6 +28,7 @@ export default function IncidenciasPage() {
     agencyNotes: "",
   });
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = async () => {
     if (!agencyId) return;
@@ -65,6 +66,14 @@ export default function IncidenciasPage() {
     }
 
     setEditIncident(null);
+    await load();
+  };
+
+  const handleDelete = async (inc: Incident) => {
+    if (!confirm(`¿Eliminar la incidencia "${INCIDENT_TYPE_LABELS[inc.type] ?? inc.type}"? Esta acción no se puede deshacer.`)) return;
+    setDeletingId(inc.id);
+    await deleteIncident(inc.id);
+    setDeletingId(null);
     await load();
   };
 
@@ -245,12 +254,22 @@ export default function IncidenciasPage() {
                       <Badge variant={sb.variant} dot>{sb.label}</Badge>
                     </td>
                     <td className="px-2 py-4">
-                      <button
-                        onClick={() => openEdit(inc)}
-                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => openEdit(inc)}
+                          className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(inc)}
+                          disabled={deletingId === inc.id}
+                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40"
+                          title="Eliminar incidencia"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
