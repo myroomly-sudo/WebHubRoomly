@@ -14,8 +14,6 @@ import {
   orderBy,
   Timestamp,
   onSnapshot,
-  writeBatch,
-  serverTimestamp,
   type QueryConstraint,
 } from "firebase/firestore";
 import { db } from "./firebase";
@@ -227,6 +225,11 @@ export async function updateIncident(
   await updateDoc(doc(db, "incidents", id), data);
 }
 
+export async function deleteIncident(id: string): Promise<void> {
+  await deleteDoc(doc(db, "incidents", id));
+}
+}
+
 // Cambia el estado de una incidencia y sus notas. IMPORTANTE: nunca se
 // pasa `resolvedAt: undefined` a updateDoc — el SDK de Firestore lanza un
 // error en tiempo de ejecución si un campo vale `undefined` ("se buguea").
@@ -297,54 +300,10 @@ export async function updatePayment(id: string, data: Partial<Payment>): Promise
 }
 
 export async function markPaymentPaid(id: string): Promise<void> {
-  // Read current payment to verify it wasn't already paid and to get tenant info
-  const paymentSnap = await getDoc(doc(db, "payments", id));
-  if (!paymentSnap.exists()) return;
-  const payment = paymentSnap.data();
-
-  // Guard: don't create duplicate notification if already paid
-  if (payment.status === "paid") {
-    await updateDoc(doc(db, "payments", id), { status: "paid", paidAt: Timestamp.now() });
-    return;
-  }
-
-  const batch = writeBatch(db);
-
-  batch.update(doc(db, "payments", id), {
+  await updateDoc(doc(db, "payments", id), {
     status: "paid",
-    paidAt: serverTimestamp(),
+    paidAt: Timestamp.now(),
   });
-
-  if (payment.tenantId) {
-    const notifRef = doc(collection(db, "notifications"));
-    batch.set(notifRef, {
-      userId: payment.tenantId,
-      propertyId: payment.propertyId,
-      type: "payment_paid",
-      message: `Tu agencia ha confirmado tu pago: ${payment.concept} de ${formatAmount(payment.amount)} €.`,
-      targetId: id,
-      read: false,
-      createdAt: serverTimestamp(),
-    });
-  }
-
-  await batch.commit();
-}
-
-
-// ─── PAYMENT NOTIFICATION HELPER ─────────────────────────────────────────────
-
-function formatDueDate(date: Date): string {
-  const day = date.getDate();
-  const months = [
-    "enero","febrero","marzo","abril","mayo","junio",
-    "julio","agosto","septiembre","octubre","noviembre","diciembre",
-  ];
-  return `${day} de ${months[date.getMonth()]}`;
-}
-
-function formatAmount(amount: number): string {
-  return amount.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // ─── CREATE PAYMENT ───────────────────────────────────────────────────────────
@@ -362,37 +321,16 @@ export async function createPayment(data: {
   dueDate: Date;
   concept: string;
   month: string;
-  status?: string;
 }): Promise<string> {
-  const batch = writeBatch(db);
-
-  const paymentRef = doc(collection(db, "payments"));
-  const paymentStatus = data.status ?? "pending";
-  batch.set(paymentRef, {
+  const ref = await addDoc(collection(db, "payments"), {
     ...data,
-    status: paymentStatus,
+    status: "pending",
     tenantNotified: false,
     tenantNote: "",
     dueDate: Timestamp.fromDate(data.dueDate),
-    createdAt: serverTimestamp(),
+    createdAt: Timestamp.now(),
   });
-
-  // Notify tenant only when payment is created as pending/overdue (not already paid)
-  if (paymentStatus !== "paid" && data.tenantId) {
-    const notifRef = doc(collection(db, "notifications"));
-    batch.set(notifRef, {
-      userId: data.tenantId,
-      propertyId: data.propertyId,
-      type: "payment_pending",
-      message: `Tienes un nuevo pago pendiente: ${data.concept} de ${formatAmount(data.amount)} €, vence el ${formatDueDate(data.dueDate)}.`,
-      targetId: paymentRef.id,
-      read: false,
-      createdAt: serverTimestamp(),
-    });
-  }
-
-  await batch.commit();
-  return paymentRef.id;
+  return ref.id;
 }
 
 export async function markPaymentOverdue(id: string): Promise<void> {
@@ -440,15 +378,10 @@ export async function generateMonthlyPayments(
   let created = 0;
   for (const roomDoc of roomsSnap.docs) {
     const room = roomDoc.data();
-    if (existingRoomIds.has(roomDoc.id)) continue;
+    if (existingRoomIds.has(roomDoc.id)) continue; // ya existe
     if (!room.currentTenantId) continue;
 
-    const batch = writeBatch(db);
-    const concept = `Alquiler ${month}`;
-    const amount = room.monthlyRent ?? 0;
-
-    const paymentRef = doc(collection(db, "payments"));
-    batch.set(paymentRef, {
+    await addDoc(collection(db, "payments"), {
       agencyId,
       propertyId,
       propertyName,
@@ -457,29 +390,15 @@ export async function generateMonthlyPayments(
       roomName: room.name,
       tenantId: room.currentTenantId,
       tenantName: room.currentTenantName ?? "",
-      amount,
+      amount: room.monthlyRent ?? 0,
       dueDate: Timestamp.fromDate(dueDate),
-      concept,
+      concept: `Alquiler ${month}`,
       month,
       status: "pending",
       tenantNotified: false,
       tenantNote: "",
-      createdAt: serverTimestamp(),
+      createdAt: Timestamp.now(),
     });
-
-    // Notify tenant of new pending payment
-    const notifRef = doc(collection(db, "notifications"));
-    batch.set(notifRef, {
-      userId: room.currentTenantId,
-      propertyId,
-      type: "payment_pending",
-      message: `Tienes un nuevo pago pendiente: ${concept} de ${formatAmount(amount)} €, vence el ${formatDueDate(dueDate)}.`,
-      targetId: paymentRef.id,
-      read: false,
-      createdAt: serverTimestamp(),
-    });
-
-    await batch.commit();
     created++;
   }
   return created;
