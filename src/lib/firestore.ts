@@ -228,7 +228,6 @@ export async function updateIncident(
 export async function deleteIncident(id: string): Promise<void> {
   await deleteDoc(doc(db, "incidents", id));
 }
-}
 
 // Cambia el estado de una incidencia y sus notas. IMPORTANTE: nunca se
 // pasa `resolvedAt: undefined` a updateDoc — el SDK de Firestore lanza un
