@@ -202,7 +202,13 @@ export default function UsuariosPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredProperties.map((prop) => {
+          {filteredProperties
+            .filter((prop) => {
+              // When searching, hide properties with no matching users
+              if (!search) return true;
+              return filterUsers(usersByProperty[prop.id] ?? []).length > 0;
+            })
+            .map((prop) => {
             const users = filterUsers(usersByProperty[prop.id] ?? []);
             const isExpanded = expandedProps.has(prop.id);
             const maxUsers = prop.maxUsers ?? 10;
