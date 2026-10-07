@@ -70,6 +70,7 @@ export default function PisosPage() {
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [userCountMap, setUserCountMap] = useState<Record<string, number>>({});
   const [form, setForm] = useState(DEFAULT_FORM);
   const [roomConfigs, setRoomConfigs] = useState<RoomConfig[]>([]);
 
@@ -243,7 +244,7 @@ export default function PisosPage() {
               ciudad: p.city,
               codigo: p.propertyCode,
               contrasena: p.propertyPassword,
-              inquilinos: `${p.currentUsers ?? 0}/${p.maxUsers}`,
+              inquilinos: `${userCountMap[p.id] ?? 0}/${p.maxUsers}`,
               habitaciones: p.roomCount ?? 0,
               estado: p.status === "active" ? "Activo" : "Inactivo",
             }))}
@@ -276,7 +277,7 @@ export default function PisosPage() {
         <EmptyState icon={Building2} title="Sin pisos registrados" description="Crea tu primer piso para empezar a gestionar inquilinos."
           action={<button onClick={openCreate} className="btn-primary"><Plus className="w-4 h-4" /> Nuevo piso</button>} />
       ) : (
-        <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-visible">
+        <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/50">
@@ -327,7 +328,7 @@ export default function PisosPage() {
                     </td>
                     <td className="px-5 py-4 hidden md:table-cell">
                       <div className="flex items-center gap-3 text-gray-600 text-xs">
-                        <div className="flex items-center gap-1"><Users className="w-3.5 h-3.5 text-gray-400" />{p.currentUsers}/{p.maxUsers}</div>
+                        <div className="flex items-center gap-1"><Users className="w-3.5 h-3.5 text-gray-400" />{userCountMap[p.id] ?? 0}/{p.maxUsers}</div>
                         <div className="flex items-center gap-1"><DoorOpen className="w-3.5 h-3.5 text-gray-400" />{p.roomCount ?? "—"}</div>
                       </div>
                     </td>
@@ -338,7 +339,7 @@ export default function PisosPage() {
                         <MoreHorizontal className="w-4 h-4" />
                       </button>
                       {menuOpen === p.id && (
-                        <div className="absolute right-0 bottom-full mb-1 bg-white border border-gray-200 rounded-xl shadow-lg z-50 min-w-[200px] py-1.5 text-sm">
+                        <div className="absolute right-4 top-12 bg-white border border-gray-200 rounded-xl shadow-lg z-20 min-w-[160px] py-1.5 text-sm">
                           <button onClick={() => openEdit(p)} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
                             <Pencil className="w-3.5 h-3.5" /> Editar
                           </button>
