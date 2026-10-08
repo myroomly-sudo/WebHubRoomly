@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Users, Search, Building2, ChevronDown, Mail, Calendar, Trash2 } from "lucide-react";
 import ExcelExportButton from "@/components/ui/ExcelExportButton";
 import { useAuth } from "@/lib/auth-context";
@@ -34,6 +35,13 @@ interface PropertyBasic {
 
 export default function UsuariosPage() {
   const { agencyId } = useAuth();
+  const searchParams = useSearchParams();
+
+  // Apply ?piso= filter immediately on mount
+  useEffect(() => {
+    const pisoParam = searchParams.get("piso");
+    if (pisoParam) setPropertyFilter(pisoParam);
+  }, []);
   const [properties, setProperties] = useState<PropertyBasic[]>([]);
   const [usersByProperty, setUsersByProperty] = useState<Record<string, FirestoreUser[]>>({});
   const [loading, setLoading] = useState(true);
