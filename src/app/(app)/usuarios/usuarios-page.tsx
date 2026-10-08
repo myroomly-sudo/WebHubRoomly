@@ -70,6 +70,7 @@ export default function PisosPage() {
   const [showModal, setShowModal] = useState(false);
   const [editTarget, setEditTarget] = useState<Property | null>(null);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [userCountMap, setUserCountMap] = useState<Record<string, number>>({});
@@ -350,12 +351,17 @@ export default function PisosPage() {
                     </td>
                     <td className="px-5 py-4"><Badge variant={sb.variant} dot>{sb.label}</Badge></td>
                     <td className="px-2 py-4 relative">
-                      <button onClick={() => setMenuOpen(menuOpen === p.id ? null : p.id)}
+                      <button onClick={(e) => {
+                          if (menuOpen === p.id) { setMenuOpen(null); setMenuPos(null); return; }
+                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          setMenuPos({ top: rect.bottom + window.scrollY, right: window.innerWidth - rect.right });
+                          setMenuOpen(p.id);
+                        }}
                         className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
                         <MoreHorizontal className="w-4 h-4" />
                       </button>
-                      {menuOpen === p.id && (
-                        <div className="absolute right-0 bottom-full mb-1 bg-white border border-gray-200 rounded-xl shadow-lg z-50 min-w-[200px] py-1.5 text-sm">
+                      {menuOpen === p.id && menuPos && (
+                        <div style={{ position: "fixed", top: menuPos.top, right: menuPos.right, zIndex: 9999 }} className="bg-white border border-gray-200 rounded-xl shadow-xl min-w-[210px] py-1.5 text-sm">
                           <button onClick={() => openEdit(p)} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
                             <Pencil className="w-3.5 h-3.5" /> Editar
                           </button>
