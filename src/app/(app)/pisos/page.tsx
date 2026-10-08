@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   Building2, Plus, Search, MoreHorizontal,
-  Pencil, Trash2, Users, Copy, CheckCheck, DoorOpen, Euro,
+  Pencil, Trash2, Users, Copy, CheckCheck, DoorOpen, Euro, SlidersHorizontal,
 } from "lucide-react";
 import {
   collection, query, where, getDocs, addDoc, updateDoc,
@@ -61,6 +61,68 @@ function buildRoomConfigs(count: number, existing: RoomConfig[]): RoomConfig[] {
   });
 }
 
+// Dropdown fijo que se renderiza en el body usando position:fixed
+function PropertyMenu({
+  property,
+  anchorRect,
+  onClose,
+  onEdit,
+  onToggleStatus,
+  onDelete,
+  onUsers,
+  onRooms,
+}: {
+  property: Property;
+  anchorRect: DOMRect;
+  onClose: () => void;
+  onEdit: () => void;
+  onToggleStatus: () => void;
+  onDelete: () => void;
+  onUsers: () => void;
+  onRooms: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  // Calculate position: open below button, aligned to its right edge
+  const top = anchorRect.bottom + 4;
+  const left = Math.min(anchorRect.right - 210, window.innerWidth - 220);
+
+  return (
+    <div
+      ref={menuRef}
+      style={{ position: "fixed", top, left: Math.max(8, left), zIndex: 9999 }}
+      className="bg-white border border-gray-200 rounded-xl shadow-xl min-w-[210px] py-1.5 text-sm"
+    >
+      <button onClick={onEdit} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
+        <Pencil className="w-3.5 h-3.5" /> Editar
+      </button>
+      <button onClick={onUsers} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
+        <Users className="w-3.5 h-3.5" /> Usuarios
+      </button>
+      <button onClick={onRooms} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
+        <DoorOpen className="w-3.5 h-3.5" /> Habitaciones
+      </button>
+      <button onClick={onToggleStatus} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
+        <Building2 className="w-3.5 h-3.5" />{property.status === "active" ? "Desactivar" : "Activar"}
+      </button>
+      <div className="border-t border-gray-100 my-1" />
+      <button onClick={onDelete} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-red-50 text-red-600">
+        <Trash2 className="w-3.5 h-3.5" /> Eliminar
+      </button>
+    </div>
+  );
+}
+
 export default function PisosPage() {
   const { agencyId } = useAuth();
   const router = useRouter();
@@ -69,7 +131,7 @@ export default function PisosPage() {
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editTarget, setEditTarget] = useState<Property | null>(null);
-  const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState<{ id: string; rect: DOMRect } | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [userCountMap, setUserCountMap] = useState<Record<string, number>>({});
@@ -90,7 +152,7 @@ export default function PisosPage() {
       });
     setProperties(props);
 
-    // Count real tenants per property from the users collection
+    // Count real tenants from users collection
     const propIds = props.map((p) => p.id);
     const countMap: Record<string, number> = {};
     for (let i = 0; i < propIds.length; i += 10) {
@@ -109,7 +171,6 @@ export default function PisosPage() {
 
   useEffect(() => { load(); }, [agencyId]);
 
-  // When roomCount changes, rebuild the room config list preserving existing entries
   useEffect(() => {
     if (!editTarget) {
       setRoomConfigs(buildRoomConfigs(form.roomCount, roomConfigs));
@@ -244,6 +305,8 @@ export default function PisosPage() {
       p.city.toLowerCase().includes(search.toLowerCase())
   );
 
+  const activeMenu = menuOpen ? properties.find((p) => p.id === menuOpen.id) : null;
+
   return (
     <div className="max-w-[1400px] space-y-6">
       <div className="flex items-center justify-between">
@@ -349,31 +412,16 @@ export default function PisosPage() {
                       </div>
                     </td>
                     <td className="px-5 py-4"><Badge variant={sb.variant} dot>{sb.label}</Badge></td>
-                    <td className="px-2 py-4 relative">
-                      <button onClick={() => setMenuOpen(menuOpen === p.id ? null : p.id)}
-                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
+                    <td className="px-2 py-4">
+                      <button
+                        onClick={(e) => {
+                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          setMenuOpen(menuOpen?.id === p.id ? null : { id: p.id, rect });
+                        }}
+                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
+                      >
                         <MoreHorizontal className="w-4 h-4" />
                       </button>
-                      {menuOpen === p.id && (
-                        <div className="absolute right-4 top-12 bg-white border border-gray-200 rounded-xl shadow-lg z-20 min-w-[160px] py-1.5 text-sm">
-                          <button onClick={() => openEdit(p)} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
-                            <Pencil className="w-3.5 h-3.5" /> Editar
-                          </button>
-                          <button onClick={() => { setMenuOpen(null); router.push(`/usuarios?piso=${p.id}`); }} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
-                            <Users className="w-3.5 h-3.5" /> Usuarios
-                          </button>
-                          <button onClick={() => { setMenuOpen(null); router.push(`/habitaciones?piso=${p.id}`); }} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
-                            <DoorOpen className="w-3.5 h-3.5" /> Habitaciones
-                          </button>
-                          <button onClick={() => handleToggleStatus(p)} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
-                            <Building2 className="w-3.5 h-3.5" />{p.status === "active" ? "Desactivar" : "Activar"}
-                          </button>
-                          <div className="border-t border-gray-100 my-1" />
-                          <button onClick={() => handleDelete(p.id)} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-red-50 text-red-600">
-                            <Trash2 className="w-3.5 h-3.5" /> Eliminar
-                          </button>
-                        </div>
-                      )}
                     </td>
                   </tr>
                 );
@@ -381,6 +429,20 @@ export default function PisosPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Portal dropdown — renderizado fuera de la tabla */}
+      {menuOpen && activeMenu && (
+        <PropertyMenu
+          property={activeMenu}
+          anchorRect={menuOpen.rect}
+          onClose={() => setMenuOpen(null)}
+          onEdit={() => { setMenuOpen(null); openEdit(activeMenu); }}
+          onToggleStatus={() => { handleToggleStatus(activeMenu); }}
+          onDelete={() => { setMenuOpen(null); handleDelete(activeMenu.id); }}
+          onUsers={() => { setMenuOpen(null); router.push(`/usuarios?piso=${activeMenu.id}`); }}
+          onRooms={() => { setMenuOpen(null); router.push(`/habitaciones?piso=${activeMenu.id}`); }}
+        />
       )}
 
       {/* Modal crear / editar piso */}
@@ -411,7 +473,6 @@ export default function PisosPage() {
             }
           </div>
 
-          {/* Configuración individual de habitaciones — solo al crear */}
           {!editTarget && roomConfigs.length > 0 && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -459,8 +520,6 @@ export default function PisosPage() {
           </div>
         </div>
       </Modal>
-
-      {menuOpen && <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(null)} />}
     </div>
   );
 }
