@@ -23,7 +23,7 @@ interface Room {
   propertyId: string;
   name: string;
   number: string;
-  status: "occupied" | "free" | "pending_payment";
+  status: "occupied" | "free";
   enabled: boolean;
   monthlyRent: number;
   currentTenantId?: string | null;
@@ -48,7 +48,7 @@ interface Tenant {
   propertyId: string;
 }
 
-type RoomStatusFilter = "all" | "occupied" | "free" | "pending_payment" | "disabled";
+type RoomStatusFilter = "all" | "occupied" | "free" | "disabled";
 
 export default function HabitacionesPage() {
   const { agencyId } = useAuth();
@@ -267,7 +267,6 @@ export default function HabitacionesPage() {
     all: rooms.length,
     occupied: rooms.filter((r) => r.status === "occupied" && r.enabled).length,
     free: rooms.filter((r) => r.status === "free" && r.enabled).length,
-    pending_payment: rooms.filter((r) => r.status === "pending_payment" && r.enabled).length,
     disabled: rooms.filter((r) => !r.enabled).length,
   };
 
@@ -275,7 +274,6 @@ export default function HabitacionesPage() {
     all: `Todas (${counts.all})`,
     occupied: `Ocupadas (${counts.occupied})`,
     free: `Libres (${counts.free})`,
-    pending_payment: `Pago pendiente (${counts.pending_payment})`,
     disabled: `Inhabilitadas (${counts.disabled})`,
   };
 
@@ -330,7 +328,7 @@ export default function HabitacionesPage() {
             descripcion: r.description ?? "",
             inquilino: r.currentTenantName ?? "",
             alquiler: r.monthlyRent,
-            estado: r.enabled ? (r.status === "occupied" ? "Ocupada" : r.status === "free" ? "Libre" : "Pago pendiente") : "Inhabilitada",
+            estado: r.enabled ? (r.status === "occupied" ? "Ocupada" : "Libre") : "Inhabilitada",
             planta: r.floor ?? "",
           }))}
           columns={[
@@ -535,7 +533,6 @@ export default function HabitacionesPage() {
               onChange={(e) => handleStatusChange(e.target.value as Room["status"])}>
               <option value="free">Libre</option>
               <option value="occupied">Ocupada</option>
-              <option value="pending_payment">Pago pendiente</option>
             </select>
           </div>
 
