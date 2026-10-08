@@ -79,15 +79,29 @@ export default function PisosPage() {
     const snap = await getDocs(
       query(collection(db, "properties"), where("agencyId", "==", agencyId))
     );
-    setProperties(
-      snap.docs
-        .map((d) => ({ id: d.id, ...d.data() } as Property))
-        .sort((a, b) => {
-          const aT = (a.createdAt as any)?.toDate?.()?.getTime() ?? 0;
-          const bT = (b.createdAt as any)?.toDate?.()?.getTime() ?? 0;
-          return bT - aT;
-        })
-    );
+    const props = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as Property))
+      .sort((a, b) => {
+        const aT = (a.createdAt as any)?.toDate?.()?.getTime() ?? 0;
+        const bT = (b.createdAt as any)?.toDate?.()?.getTime() ?? 0;
+        return bT - aT;
+      });
+    setProperties(props);
+
+    // Count real tenants per property from the users collection
+    const propIds = props.map((p) => p.id);
+    const countMap: Record<string, number> = {};
+    for (let i = 0; i < propIds.length; i += 10) {
+      const chunk = propIds.slice(i, i + 10);
+      const usersSnap = await getDocs(
+        query(collection(db, "users"), where("propertyId", "in", chunk))
+      );
+      usersSnap.docs.forEach((d) => {
+        const pid = d.data().propertyId as string;
+        countMap[pid] = (countMap[pid] ?? 0) + 1;
+      });
+    }
+    setUserCountMap(countMap);
     setLoading(false);
   };
 
