@@ -1,524 +1,338 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
+import { Users, Search, Building2, ChevronDown, Mail, Calendar, Trash2 } from "lucide-react";
+import ExcelExportButton from "@/components/ui/ExcelExportButton";
+import { useAuth } from "@/lib/auth-context";
 import {
-  Building2, Plus, Search, MoreHorizontal,
-  Pencil, Trash2, Users, Copy, CheckCheck, DoorOpen, Euro, SlidersHorizontal,
-} from "lucide-react";
-import {
-  collection, query, where, getDocs, addDoc, updateDoc,
-  deleteDoc, doc, Timestamp, writeBatch,
+  collection,
+  query,
+  where,
+  getDocs,
+  deleteDoc,
+  doc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { useAuth } from "@/lib/auth-context";
-import { useRouter } from "next/navigation";
-import Modal from "@/components/ui/Modal";
-import EmptyState from "@/components/ui/EmptyState";
-import Badge, { propertyStatusBadge } from "@/components/ui/Badge";
-import { generatePropertyCode, generatePropertyPassword } from "@/lib/utils";
-import ExcelExportButton from "@/components/ui/ExcelExportButton";
+import { formatDate, getInitials } from "@/lib/utils";
 
-interface Property {
+interface FirestoreUser {
   id: string;
-  agencyId: string;
+  email: string;
+  username: string;
+  propertyId: string;
+  createdAt: string | Date | { toDate: () => Date };
+  avatarUrl?: string;
+}
+
+interface PropertyBasic {
+  id: string;
   name: string;
-  address: string;
-  city: string;
-  status: "active" | "inactive";
+  address?: string;
   propertyCode: string;
-  propertyPassword: string;
-  code?: string;
-  passwordHash?: string;
-  active?: boolean;
   maxUsers: number;
-  currentUsers: number;
-  roomCount?: number;
-  defaultMonthlyRent?: number;
-  houseRules?: string;
-  createdAt: unknown;
-  updatedAt: unknown;
 }
 
-interface RoomConfig {
-  number: number;
-  description: string;
-  monthlyRent: number;
-}
-
-const DEFAULT_FORM = {
-  name: "",
-  address: "",
-  city: "",
-  houseRules: "",
-  roomCount: 4,
-  defaultMonthlyRent: 0,
-};
-
-function buildRoomConfigs(count: number, existing: RoomConfig[]): RoomConfig[] {
-  return Array.from({ length: count }, (_, i) => {
-    const n = i + 1;
-    return existing.find((r) => r.number === n) ?? { number: n, description: "", monthlyRent: 0 };
-  });
-}
-
-// Dropdown fijo que se renderiza en el body usando position:fixed
-function PropertyMenu({
-  property,
-  anchorRect,
-  onClose,
-  onEdit,
-  onToggleStatus,
-  onDelete,
-  onUsers,
-  onRooms,
-}: {
-  property: Property;
-  anchorRect: DOMRect;
-  onClose: () => void;
-  onEdit: () => void;
-  onToggleStatus: () => void;
-  onDelete: () => void;
-  onUsers: () => void;
-  onRooms: () => void;
-}) {
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
-
-  const top = anchorRect.bottom + window.scrollY + 4;
-  const right = window.innerWidth - anchorRect.right;
-
-  return (
-    <div
-      ref={menuRef}
-      style={{ position: "fixed", top: anchorRect.bottom + 4, right: window.innerWidth - anchorRect.right, zIndex: 9999 }}
-      className="bg-white border border-gray-200 rounded-xl shadow-xl min-w-[210px] py-1.5 text-sm"
-    >
-      <button onClick={onEdit} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
-        <Pencil className="w-3.5 h-3.5" /> Editar
-      </button>
-      <button onClick={onUsers} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
-        <Users className="w-3.5 h-3.5" /> Usuarios
-      </button>
-      <button onClick={onRooms} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
-        <DoorOpen className="w-3.5 h-3.5" /> Habitaciones
-      </button>
-      <button onClick={onToggleStatus} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-gray-50 text-gray-700">
-        <Building2 className="w-3.5 h-3.5" />{property.status === "active" ? "Desactivar" : "Activar"}
-      </button>
-      <div className="border-t border-gray-100 my-1" />
-      <button onClick={onDelete} className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-red-50 text-red-600">
-        <Trash2 className="w-3.5 h-3.5" /> Eliminar
-      </button>
-    </div>
-  );
-}
-
-export default function PisosPage() {
+export default function UsuariosPage() {
   const { agencyId } = useAuth();
-  const router = useRouter();
-  const [properties, setProperties] = useState<Property[]>([]);
+  const [properties, setProperties] = useState<PropertyBasic[]>([]);
+  const [usersByProperty, setUsersByProperty] = useState<Record<string, FirestoreUser[]>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [showModal, setShowModal] = useState(false);
-  const [editTarget, setEditTarget] = useState<Property | null>(null);
-  const [menuOpen, setMenuOpen] = useState<{ id: string; rect: DOMRect } | null>(null);
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [userCountMap, setUserCountMap] = useState<Record<string, number>>({});
-  const [form, setForm] = useState(DEFAULT_FORM);
-  const [roomConfigs, setRoomConfigs] = useState<RoomConfig[]>([]);
+  const [propertyFilter, setPropertyFilter] = useState("all");
+  const [expandedProps, setExpandedProps] = useState<Set<string>>(new Set());
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = async () => {
     if (!agencyId) return;
-    const snap = await getDocs(
+
+    // 1. Fetch properties for this agency
+    const propsSnap = await getDocs(
       query(collection(db, "properties"), where("agencyId", "==", agencyId))
     );
-    const props = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() } as Property))
-      .sort((a, b) => {
-        const aT = (a.createdAt as any)?.toDate?.()?.getTime() ?? 0;
-        const bT = (b.createdAt as any)?.toDate?.()?.getTime() ?? 0;
-        return bT - aT;
-      });
+    const props: PropertyBasic[] = propsSnap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as Omit<PropertyBasic, "id">),
+    }));
     setProperties(props);
 
-    // Count real tenants from users collection
-    const propIds = props.map((p) => p.id);
-    const countMap: Record<string, number> = {};
-    for (let i = 0; i < propIds.length; i += 10) {
-      const chunk = propIds.slice(i, i + 10);
-      const usersSnap = await getDocs(
-        query(collection(db, "users"), where("propertyId", "in", chunk))
-      );
-      usersSnap.docs.forEach((d) => {
-        const pid = d.data().propertyId as string;
-        countMap[pid] = (countMap[pid] ?? 0) + 1;
-      });
-    }
-    setUserCountMap(countMap);
+    // 2. Fetch users for each property from the "users" collection
+    const map: Record<string, FirestoreUser[]> = {};
+    await Promise.all(
+      props.map(async (p) => {
+        try {
+          const usersSnap = await getDocs(
+            query(
+              collection(db, "users"),
+              where("propertyId", "==", p.id)
+            )
+          );
+          map[p.id] = usersSnap.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as Omit<FirestoreUser, "id">),
+          }));
+        } catch {
+          map[p.id] = [];
+        }
+      })
+    );
+
+    setUsersByProperty(map);
+    setExpandedProps(new Set(props.map((p) => p.id)));
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, [agencyId]);
-
   useEffect(() => {
-    if (!editTarget) {
-      setRoomConfigs(buildRoomConfigs(form.roomCount, roomConfigs));
-    }
-  }, [form.roomCount]);
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agencyId]);
 
-  const openCreate = () => {
-    setEditTarget(null);
-    setForm(DEFAULT_FORM);
-    setRoomConfigs(buildRoomConfigs(DEFAULT_FORM.roomCount, []));
-    setShowModal(true);
-  };
-
-  const openEdit = (p: Property) => {
-    setEditTarget(p);
-    setForm({
-      name: p.name,
-      address: p.address,
-      city: p.city,
-      houseRules: p.houseRules ?? "",
-      roomCount: p.roomCount ?? 0,
-      defaultMonthlyRent: p.defaultMonthlyRent ?? 0,
+  const toggleExpand = (id: string) => {
+    setExpandedProps((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
     });
-    setRoomConfigs([]);
-    setMenuOpen(null);
-    setShowModal(true);
   };
 
-  const updateRoomConfig = (index: number, field: keyof RoomConfig, value: string | number) => {
-    setRoomConfigs((prev) =>
-      prev.map((r, i) => (i === index ? { ...r, [field]: value } : r))
-    );
+  const formatUserDate = (date: FirestoreUser["createdAt"]): string => {
+    if (!date) return "—";
+    if (typeof date === "string") return formatDate(new Date(date));
+    if (typeof date === "object" && "toDate" in date) return formatDate(date.toDate());
+    return formatDate(date as Date);
   };
 
-  const createRoomsForProperty = async (propertyId: string, configs: RoomConfig[], propertyName: string) => {
-    const batch = writeBatch(db);
-    for (const cfg of configs) {
-      const roomRef = doc(collection(db, "rooms"));
-      batch.set(roomRef, {
-        propertyId,
-        agencyId,
-        name: `${propertyName} — Hab. ${cfg.number}`,
-        number: String(cfg.number),
-        description: cfg.description,
-        status: "free",
-        enabled: true,
-        monthlyRent: cfg.monthlyRent,
-        currentTenantId: null,
-        currentTenantName: null,
-        floor: 1,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      });
-    }
-    await batch.commit();
-  };
+  const totalUsers = Object.values(usersByProperty).flat().length;
 
-  const handleSave = async () => {
-    if (!agencyId || !form.name || !form.address) return;
-    setSaving(true);
-    try {
-      if (editTarget) {
-        await updateDoc(doc(db, "properties", editTarget.id), {
-          name: form.name,
-          address: form.address,
-          city: form.city,
-          houseRules: form.houseRules,
-          roomCount: form.roomCount,
-          defaultMonthlyRent: form.defaultMonthlyRent,
-          updatedAt: Timestamp.now(),
-        });
-      } else {
-        const code = generatePropertyCode();
-        const password = generatePropertyPassword();
-        const newPropRef = await addDoc(collection(db, "properties"), {
-          agencyId,
-          name: form.name,
-          address: form.address,
-          city: form.city,
-          houseRules: form.houseRules,
-          roomCount: form.roomCount,
-          defaultMonthlyRent: form.defaultMonthlyRent,
-          maxUsers: form.roomCount,
-          propertyCode: code,
-          propertyPassword: password,
-          code,
-          passwordHash: password,
-          active: true,
-          currentUsers: 0,
-          status: "active",
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now(),
-        });
-        if (roomConfigs.length > 0) {
-          await createRoomsForProperty(newPropRef.id, roomConfigs, form.name);
-        }
-      }
-      setShowModal(false);
-      await load();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("¿Eliminar este piso? Esta acción no se puede deshacer.")) return;
-    await deleteDoc(doc(db, "properties", id));
-    setMenuOpen(null);
-    await load();
-  };
-
-  const handleToggleStatus = async (p: Property) => {
-    await updateDoc(doc(db, "properties", p.id), {
-      status: p.status === "active" ? "inactive" : "active",
-      active: p.status !== "active",
-      updatedAt: Timestamp.now(),
-    });
-    setMenuOpen(null);
-    await load();
-  };
-
-  const copyCode = (value: string) => {
-    navigator.clipboard.writeText(value);
-    setCopiedCode(value);
-    setTimeout(() => setCopiedCode(null), 2000);
-  };
-
-  const filtered = properties.filter(
-    (p) =>
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.address.toLowerCase().includes(search.toLowerCase()) ||
-      p.city.toLowerCase().includes(search.toLowerCase())
+  const filteredProperties = properties.filter(
+    (p) => propertyFilter === "all" || p.id === propertyFilter
   );
 
-  const activeMenu = menuOpen ? properties.find((p) => p.id === menuOpen.id) : null;
+  const filterUsers = (users: FirestoreUser[]) =>
+    users.filter(
+      (u) =>
+        u.username?.toLowerCase().includes(search.toLowerCase()) ||
+        u.email?.toLowerCase().includes(search.toLowerCase())
+    );
+
+  const handleDeleteUser = async (user: FirestoreUser) => {
+    if (!confirm(`¿Eliminar al inquilino "${user.username ?? user.email}"? Esta acción no se puede deshacer.`)) return;
+    setDeletingId(user.id);
+    await deleteDoc(doc(db, "users", user.id));
+    setDeletingId(null);
+    await load();
+  };
 
   return (
     <div className="max-w-[1400px] space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-xl font-bold text-roomly-charcoal">Pisos</h2>
-          <p className="text-sm text-gray-400 mt-0.5">{properties.length} propiedades registradas</p>
+          <h2 className="text-xl font-bold text-roomly-charcoal">Usuarios</h2>
+          <p className="text-sm text-gray-400 mt-0.5">
+            {totalUsers} inquilinos registrados en {properties.length} pisos
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <ExcelExportButton
-            filename="pisos"
-            data={filtered.map((p) => ({
-              nombre: p.name,
-              direccion: p.address,
-              ciudad: p.city,
-              codigo: p.propertyCode,
-              contrasena: p.propertyPassword,
-              inquilinos: `${userCountMap[p.id] ?? 0}/${p.maxUsers}`,
-              habitaciones: p.roomCount ?? 0,
-              estado: p.status === "active" ? "Activo" : "Inactivo",
-            }))}
-            columns={[
-              { header: "Nombre", key: "nombre" },
-              { header: "Dirección", key: "direccion" },
-              { header: "Ciudad", key: "ciudad" },
-              { header: "Código", key: "codigo" },
-              { header: "Contraseña", key: "contrasena" },
-              { header: "Inquilinos", key: "inquilinos" },
-              { header: "Habitaciones", key: "habitaciones" },
-              { header: "Estado", key: "estado" },
-            ]}
-          />
-          <button onClick={openCreate} className="btn-primary">
-            <Plus className="w-4 h-4" /> Nuevo piso
-          </button>
-        </div>
-      </div>
-
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por nombre, dirección…" className="input-field pl-9" />
-      </div>
-
-      {loading ? (
-        <div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-16 bg-gray-100 rounded-xl animate-pulse" />)}</div>
-      ) : filtered.length === 0 ? (
-        <EmptyState icon={Building2} title="Sin pisos registrados" description="Crea tu primer piso para empezar a gestionar inquilinos."
-          action={<button onClick={openCreate} className="btn-primary"><Plus className="w-4 h-4" /> Nuevo piso</button>} />
-      ) : (
-        <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50/50">
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Piso</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">Ciudad</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Acceso</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">Inquilinos / Hab.</th>
-                <th className="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Estado</th>
-                <th className="w-12 px-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {filtered.map((p) => {
-                const sb = propertyStatusBadge(p.status);
-                return (
-                  <tr key={p.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-sky-50 rounded-xl flex items-center justify-center flex-shrink-0">
-                          <Building2 className="w-4 h-4 text-sky-500" />
-                        </div>
-                        <div>
-                          <p className="font-semibold text-gray-800">{p.name}</p>
-                          <p className="text-xs text-gray-400 truncate max-w-[200px]">{p.address}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 hidden lg:table-cell text-gray-600">{p.city}</td>
-                    <td className="px-5 py-4">
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-gray-400 w-16">Código</span>
-                          <code className="text-xs bg-gray-100 px-2 py-0.5 rounded-lg font-mono font-semibold text-gray-700">{p.propertyCode}</code>
-                          <button onClick={() => copyCode(p.propertyCode)} className="p-1 text-gray-400 hover:text-gray-600">
-                            {copiedCode === p.propertyCode ? <CheckCheck className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                          </button>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-gray-400 w-16">Contraseña</span>
-                          <code className="text-xs bg-amber-50 px-2 py-0.5 rounded-lg font-mono font-semibold text-amber-700">{p.propertyPassword ?? "—"}</code>
-                          {p.propertyPassword && (
-                            <button onClick={() => copyCode(p.propertyPassword)} className="p-1 text-gray-400 hover:text-gray-600">
-                              {copiedCode === p.propertyPassword ? <CheckCheck className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 hidden md:table-cell">
-                      <div className="flex items-center gap-3 text-gray-600 text-xs">
-                        <div className="flex items-center gap-1"><Users className="w-3.5 h-3.5 text-gray-400" />{userCountMap[p.id] ?? 0}/{p.maxUsers}</div>
-                        <div className="flex items-center gap-1"><DoorOpen className="w-3.5 h-3.5 text-gray-400" />{p.roomCount ?? "—"}</div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4"><Badge variant={sb.variant} dot>{sb.label}</Badge></td>
-                    <td className="px-2 py-4">
-                      <button
-                        onClick={(e) => {
-                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                          setMenuOpen(menuOpen?.id === p.id ? null : { id: p.id, rect });
-                        }}
-                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
-                      >
-                        <MoreHorizontal className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Portal dropdown — renderizado fuera de la tabla */}
-      {menuOpen && activeMenu && (
-        <PropertyMenu
-          property={activeMenu}
-          anchorRect={menuOpen.rect}
-          onClose={() => setMenuOpen(null)}
-          onEdit={() => { setMenuOpen(null); openEdit(activeMenu); }}
-          onToggleStatus={() => { handleToggleStatus(activeMenu); }}
-          onDelete={() => { setMenuOpen(null); handleDelete(activeMenu.id); }}
-          onUsers={() => { setMenuOpen(null); router.push(`/usuarios?piso=${activeMenu.id}`); }}
-          onRooms={() => { setMenuOpen(null); router.push(`/habitaciones?piso=${activeMenu.id}`); }}
+        <ExcelExportButton
+          filename="usuarios"
+          data={Object.entries(usersByProperty).flatMap(([propId, users]) => {
+            const prop = properties.find((p) => p.id === propId);
+            return users.map((u) => ({
+              nombre: u.username,
+              email: u.email,
+              telefono: (u as any).phone ?? "",
+              piso: prop?.name ?? "",
+              fecha: formatUserDate(u.createdAt),
+            }));
+          })}
+          columns={[
+            { header: "Nombre", key: "nombre" },
+            { header: "Email", key: "email" },
+            { header: "Teléfono", key: "telefono" },
+            { header: "Piso", key: "piso" },
+            { header: "Fecha registro", key: "fecha" },
+          ]}
         />
-      )}
+      </div>
 
-      {/* Modal crear / editar piso */}
-      <Modal open={showModal} onClose={() => setShowModal(false)} title={editTarget ? "Editar piso" : "Nuevo piso"} maxWidth="lg">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Nombre del piso *</label>
-            <input className="input-field" placeholder="ej. Piso Centro Madrid" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Dirección *</label>
-            <input className="input-field" placeholder="Calle Mayor 12, 3ºB" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Ciudad</label>
-            <input className="input-field" placeholder="Madrid" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Nº de habitaciones</label>
-            <input type="number" min={0} max={20} className="input-field"
-              value={form.roomCount}
-              onChange={(e) => setForm({ ...form, roomCount: Number(e.target.value) })}
-              disabled={!!editTarget}
-            />
-            {editTarget
-              ? <p className="text-xs text-gray-400 mt-1">Las habitaciones se gestionan desde la sección Habitaciones.</p>
-              : <p className="text-xs text-gray-400 mt-1">Se crean automáticamente al guardar.</p>
-            }
-          </div>
-
-          {!editTarget && roomConfigs.length > 0 && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Configuración de habitaciones
-              </label>
-              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                {roomConfigs.map((cfg, i) => (
-                  <div key={cfg.number} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2.5">
-                    <div className="w-7 h-7 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center text-xs font-bold flex-shrink-0">
-                      {cfg.number}
-                    </div>
-                    <input
-                      className="input-field flex-1 text-xs py-1.5"
-                      placeholder="Descripción (ej. Suite, Exterior…)"
-                      value={cfg.description}
-                      onChange={(e) => updateRoomConfig(i, "description", e.target.value)}
-                    />
-                    <div className="relative flex-shrink-0 w-28">
-                      <Euro className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
-                      <input
-                        type="number"
-                        min={0}
-                        className="input-field pl-7 text-xs py-1.5 w-full"
-                        placeholder="Precio"
-                        value={cfg.monthlyRent || ""}
-                        onChange={(e) => updateRoomConfig(i, "monthlyRent", Number(e.target.value))}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Normas de convivencia</label>
-            <textarea className="input-field resize-none h-20" placeholder="Escribe las normas…"
-              value={form.houseRules} onChange={(e) => setForm({ ...form, houseRules: e.target.value })} />
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <button onClick={() => setShowModal(false)} className="btn-secondary">Cancelar</button>
-            <button onClick={handleSave} disabled={saving} className="btn-primary">
-              {saving ? "Guardando…" : editTarget ? "Guardar cambios" : "Crear piso"}
-            </button>
-          </div>
+      {/* Filters */}
+      <div className="flex gap-3 flex-wrap">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nombre o email…"
+            className="w-full border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm pl-9
+                       focus:outline-none focus:ring-2 focus:ring-roomly-navy/20 focus:border-roomly-navy
+                       transition-all bg-white w-64"
+          />
         </div>
-      </Modal>
+        <div className="relative">
+          <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <select
+            value={propertyFilter}
+            onChange={(e) => setPropertyFilter(e.target.value)}
+            className="border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm pl-9 pr-8
+                       focus:outline-none focus:ring-2 focus:ring-roomly-navy/20 focus:border-roomly-navy
+                       transition-all bg-white appearance-none cursor-pointer w-52"
+          >
+            <option value="all">Todos los pisos</option>
+            {properties.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Content */}
+      {loading ? (
+        <div className="space-y-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="bg-gray-100 rounded-2xl h-32 animate-pulse" />
+          ))}
+        </div>
+      ) : filteredProperties.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="w-14 h-14 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
+            <Users className="w-7 h-7 text-gray-400" />
+          </div>
+          <h3 className="text-base font-semibold text-gray-700 mb-1">Sin pisos</h3>
+          <p className="text-sm text-gray-400">Crea un piso para empezar a ver inquilinos.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {filteredProperties
+            .filter((prop) => {
+              // When searching, hide properties with no matching users
+              if (!search) return true;
+              return filterUsers(usersByProperty[prop.id] ?? []).length > 0;
+            })
+            .map((prop) => {
+            const users = filterUsers(usersByProperty[prop.id] ?? []);
+            const isExpanded = expandedProps.has(prop.id);
+            const maxUsers = prop.maxUsers ?? 10;
+
+            return (
+              <div
+                key={prop.id}
+                className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
+              >
+                {/* Property header */}
+                <button
+                  onClick={() => toggleExpand(prop.id)}
+                  className="w-full flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition-colors text-left"
+                >
+                  <div className="w-9 h-9 bg-sky-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <Building2 className="w-4 h-4 text-sky-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-gray-800">{prop.name}</p>
+                    <p className="text-xs text-gray-400">
+                      {prop.address ?? "Sin dirección"} · {users.length}/{maxUsers} inquilinos
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-gray-400 hidden sm:block">
+                      Código:{" "}
+                      <code className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
+                        {prop.propertyCode}
+                      </code>
+                    </span>
+                    {/* Occupancy bar */}
+                    <div className="hidden md:flex items-center gap-2">
+                      <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-roomly-sky rounded-full"
+                          style={{ width: `${Math.min((users.length / maxUsers) * 100, 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-gray-400">
+                        {Math.round((users.length / maxUsers) * 100)}%
+                      </span>
+                    </div>
+                    <ChevronDown
+                      className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                    />
+                  </div>
+                </button>
+
+                {/* Users table */}
+                {isExpanded && (
+                  <>
+                    {users.length === 0 ? (
+                      <div className="px-5 py-8 border-t border-gray-50 text-center">
+                        <Users className="w-8 h-8 mx-auto mb-2 text-gray-200" />
+                        <p className="text-sm text-gray-400">
+                          Sin inquilinos{search ? " que coincidan con la búsqueda" : " registrados aún"}.
+                        </p>
+                      </div>
+                    ) : (
+                      <table className="w-full text-sm border-t border-gray-100">
+                        <thead>
+                          <tr className="bg-gray-50/50">
+                            <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                              Inquilino
+                            </th>
+                            <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">
+                              Email
+                            </th>
+                            <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">
+                              Se unió
+                            </th>
+                            <th className="w-10 px-2" />
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {users.map((user) => {
+                            const initials = getInitials(user.username ?? user.email ?? "?");
+                            return (
+                              <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-5 py-3.5">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-roomly-lavender/30 text-violet-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                      {initials}
+                                    </div>
+                                    <span className="font-medium text-gray-800">
+                                      {user.username ?? "Sin nombre"}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="px-5 py-3.5 hidden md:table-cell">
+                                  <div className="flex items-center gap-1.5 text-gray-500 text-xs">
+                                    <Mail className="w-3.5 h-3.5 text-gray-300" />
+                                    {user.email}
+                                  </div>
+                                </td>
+                                <td className="px-5 py-3.5 hidden lg:table-cell">
+                                  <div className="flex items-center gap-1.5 text-gray-400 text-xs">
+                                    <Calendar className="w-3.5 h-3.5 text-gray-300" />
+                                    {formatUserDate(user.createdAt)}
+                                  </div>
+                                </td>
+                                <td className="px-2 py-3.5">
+                                  <button
+                                    onClick={() => handleDeleteUser(user)}
+                                    disabled={deletingId === user.id}
+                                    className="p-1.5 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40"
+                                    title="Eliminar inquilino"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
