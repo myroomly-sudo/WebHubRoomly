@@ -180,24 +180,47 @@ function OccupancyChart({ agencyId }: { agencyId: string }) {
       });
     }
 
-    // 5. Occupancy proxy (current state extrapolated)
-    const usersSnap = await getDocs(
-      query(collection(db, "users"), where("propertyId", "in", propIds.slice(0, 10)))
-    );
-    let currentOccupied = usersSnap.size;
-    const currentOccupancy = totalRooms > 0 ? (currentOccupied / totalRooms) * 100 : 0;
+    // 5. Occupancy real por mes: habitaciones distintas con pago "paid" ese mes
+    //    (proxy histórico fiable basado en datos reales del seed y pagos futuros)
+    const occupiedByMonth: Record<string, Set<string>> = {};
+    paymentsSnap.docs.forEach((d) => {
+      const p = d.data();
+      if (p.status !== "paid" || !p.month || !p.roomId) return;
+      if (!occupiedByMonth[p.month]) occupiedByMonth[p.month] = new Set();
+      occupiedByMonth[p.month].add(p.roomId);
+    });
 
-    const points: MonthPoint[] = months.map((iso, idx) => {
-      const isCurrentMonth = idx === months.length - 1;
-      const variation = isCurrentMonth ? 0 : Math.sin(idx * 1.3) * 15;
-      const occ = Math.min(100, Math.max(0, currentOccupancy + variation));
-      const occupied = Math.round((occ / 100) * totalRooms);
+    // Para el mes actual usamos el estado real de las habitaciones
+    const currentIso = isoMonth(new Date());
+    let currentOccupied = 0;
+    for (let i = 0; i < propIds.length; i += 10) {
+      const chunk = propIds.slice(i, i + 10);
+      const snap = await getDocs(
+        query(collection(db, "rooms"),
+          where("propertyId", "in", chunk),
+          where("status", "==", "occupied")
+        )
+      );
+      currentOccupied += snap.docs.filter(d => d.data().enabled !== false).length;
+    }
+
+    const points: MonthPoint[] = months.map((iso) => {
+      const isCurrentMonth = iso === currentIso;
+      let occupiedCount: number;
+      if (isCurrentMonth) {
+        occupiedCount = currentOccupied;
+      } else if (occupiedByMonth[iso]) {
+        occupiedCount = occupiedByMonth[iso].size;
+      } else {
+        occupiedCount = 0;
+      }
+      const occ = totalRooms > 0 ? Math.min(100, (occupiedCount / totalRooms) * 100) : 0;
       const created = createdByMonth[iso] ?? 0;
       return {
         month: labelMonth(iso),
         isoMonth: iso,
         occupancy: Math.round(occ * 10) / 10,
-        occupiedRooms: occupied,
+        occupiedRooms: occupiedCount,
         totalRooms,
         revenue: revenueByMonth[iso] ?? 0,
         incidentsCreated: created,
