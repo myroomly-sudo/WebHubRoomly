@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, Search, Building2, ChevronDown, Mail, Calendar } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { Users, Search, Building2, ChevronDown, Mail, Calendar, Trash2 } from "lucide-react";
+import ExcelExportButton from "@/components/ui/ExcelExportButton";
 import { useAuth } from "@/lib/auth-context";
 import {
   collection,
   query,
   where,
   getDocs,
-  orderBy,
+  deleteDoc,
+  doc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { formatDate, getInitials } from "@/lib/utils";
@@ -32,12 +35,14 @@ interface PropertyBasic {
 
 export default function UsuariosPage() {
   const { agencyId } = useAuth();
+  const searchParams = useSearchParams();
   const [properties, setProperties] = useState<PropertyBasic[]>([]);
   const [usersByProperty, setUsersByProperty] = useState<Record<string, FirestoreUser[]>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [propertyFilter, setPropertyFilter] = useState("all");
   const [expandedProps, setExpandedProps] = useState<Set<string>>(new Set());
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = async () => {
     if (!agencyId) return;
@@ -111,6 +116,14 @@ export default function UsuariosPage() {
         u.email?.toLowerCase().includes(search.toLowerCase())
     );
 
+  const handleDeleteUser = async (user: FirestoreUser) => {
+    if (!confirm(`¿Eliminar al inquilino "${user.username ?? user.email}"? Esta acción no se puede deshacer.`)) return;
+    setDeletingId(user.id);
+    await deleteDoc(doc(db, "users", user.id));
+    setDeletingId(null);
+    await load();
+  };
+
   return (
     <div className="max-w-[1400px] space-y-6">
       {/* Header */}
@@ -121,6 +134,26 @@ export default function UsuariosPage() {
             {totalUsers} inquilinos registrados en {properties.length} pisos
           </p>
         </div>
+        <ExcelExportButton
+          filename="usuarios"
+          data={Object.entries(usersByProperty).flatMap(([propId, users]) => {
+            const prop = properties.find((p) => p.id === propId);
+            return users.map((u) => ({
+              nombre: u.username,
+              email: u.email,
+              telefono: (u as any).phone ?? "",
+              piso: prop?.name ?? "",
+              fecha: formatUserDate(u.createdAt),
+            }));
+          })}
+          columns={[
+            { header: "Nombre", key: "nombre" },
+            { header: "Email", key: "email" },
+            { header: "Teléfono", key: "telefono" },
+            { header: "Piso", key: "piso" },
+            { header: "Fecha registro", key: "fecha" },
+          ]}
+        />
       </div>
 
       {/* Filters */}
@@ -171,7 +204,13 @@ export default function UsuariosPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredProperties.map((prop) => {
+          {filteredProperties
+            .filter((prop) => {
+              // When searching, hide properties with no matching users
+              if (!search) return true;
+              return filterUsers(usersByProperty[prop.id] ?? []).length > 0;
+            })
+            .map((prop) => {
             const users = filterUsers(usersByProperty[prop.id] ?? []);
             const isExpanded = expandedProps.has(prop.id);
             const maxUsers = prop.maxUsers ?? 10;
@@ -243,6 +282,7 @@ export default function UsuariosPage() {
                             <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">
                               Se unió
                             </th>
+                            <th className="w-10 px-2" />
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
@@ -271,6 +311,16 @@ export default function UsuariosPage() {
                                     <Calendar className="w-3.5 h-3.5 text-gray-300" />
                                     {formatUserDate(user.createdAt)}
                                   </div>
+                                </td>
+                                <td className="px-2 py-3.5">
+                                  <button
+                                    onClick={() => handleDeleteUser(user)}
+                                    disabled={deletingId === user.id}
+                                    className="p-1.5 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40"
+                                    title="Eliminar inquilino"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
                                 </td>
                               </tr>
                             );
