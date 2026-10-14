@@ -30,7 +30,7 @@ interface Agency {
   bankAccountHolder?: string;
   bankIban?: string;
   bankName?: string;
-  status: "active" | "inactive";
+  status: "active" | "inactive" | "pending";
   createdAt: unknown;
 }
 
@@ -259,7 +259,7 @@ export default function AdminPage() {
                     </td>
                     <td className="px-5 py-4 text-gray-600">{agency.city || "—"}</td>
                     <td className="px-5 py-4">
-                      <Badge variant={agency.status === "active" ? "green" : agency.status === "pending" ? "yellow" : "gray"} dot>
+                      <Badge variant={(agency.status === "active" ? "green" : "gray") as any} dot>
                         {agency.status === "active" ? "Activa" : agency.status === "pending" ? "Pendiente" : "Inactiva"}
                       </Badge>
                     </td>
