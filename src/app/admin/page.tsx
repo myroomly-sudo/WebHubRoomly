@@ -62,6 +62,7 @@ export default function AdminPage() {
   const [creating, setCreating] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
 
   // Simple local auth for superadmin panel
   const handleAuth = () => {
@@ -92,77 +93,36 @@ export default function AdminPage() {
     setSuccess(null);
 
     try {
-      // 1. Create Firebase Auth user via Admin REST API
-      const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY!;
-      const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID!;
+      const { setDoc } = await import("firebase/firestore");
 
-      // Generate temporary password
-      const tempPassword = `Roomly${Math.random().toString(36).slice(2, 8).toUpperCase()}!`;
+      // Guardar datos de la agencia en Firestore con email como ID provisional
+      // La cuenta de Firebase Auth la crea el superadmin manualmente en Firebase Console
+      // El documento usa el email como ID hasta que se cree la cuenta Auth
+      const agencyRef = doc(collection(db, "agencies"));
+      await setDoc(agencyRef, {
+        id: agencyRef.id,
+        email: form.email,
+        agencyName: form.agencyName,
+        contactName: form.contactName || "",
+        phone: form.phone || "",
+        address: form.address || "",
+        city: form.city || "",
+        postalCode: form.postalCode || "",
+        taxId: form.taxId || "",
+        bankAccountHolder: form.bankAccountHolder || "",
+        bankIban: form.bankIban || "",
+        bankName: form.bankName || "",
+        status: "pending", // pending hasta que se cree la cuenta Auth
+        createdAt: Timestamp.now(),
+      });
 
-      // Create user via Firebase Auth REST API
-      const createRes = await fetch(
-        `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: form.email,
-            password: tempPassword,
-            returnSecureToken: false,
-          }),
-        }
-      );
-      const createData = await createRes.json();
-      if (!createRes.ok) {
-        throw new Error(createData.error?.message ?? "Error al crear usuario");
-      }
-      const uid = createData.localId;
-
-      // 2. Save agency data to Firestore
-      const agencyRef = doc(db, "agencies", uid);
-      await import("firebase/firestore").then(({ setDoc }) =>
-        setDoc(agencyRef, {
-          id: uid,
-          email: form.email,
-          agencyName: form.agencyName,
-          contactName: form.contactName || "",
-          phone: form.phone || "",
-          address: form.address || "",
-          city: form.city || "",
-          postalCode: form.postalCode || "",
-          taxId: form.taxId || "",
-          bankAccountHolder: form.bankAccountHolder || "",
-          bankIban: form.bankIban || "",
-          bankName: form.bankName || "",
-          status: "active",
-          createdAt: Timestamp.now(),
-        })
-      );
-
-      // 3. Send password reset email so agency can set their own password
-      await fetch(
-        `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            requestType: "PASSWORD_RESET",
-            email: form.email,
-          }),
-        }
-      );
-
-      setSuccess(`✓ Agencia "${form.agencyName}" creada. Se ha enviado un email a ${form.email} para que establezca su contraseña.`);
+      setSuccess(`✓ Datos de "${form.agencyName}" guardados. Ahora crea la cuenta en Firebase Console (Authentication → Add user) con el email ${form.email} y envíale el email de restablecimiento de contraseña.`);
+      setPendingEmail(form.email);
       setForm(DEFAULT_FORM);
       setShowModal(false);
       await loadAgencies();
     } catch (e: any) {
-      const msg = e.message ?? "";
-      if (msg.includes("EMAIL_EXISTS")) {
-        setError("Ya existe una cuenta con ese email.");
-      } else {
-        setError(`Error: ${msg}`);
-      }
+      setError(`Error: ${e.message ?? "Error desconocido"}`);
     } finally {
       setCreating(false);
     }
@@ -245,9 +205,20 @@ export default function AdminPage() {
         </div>
 
         {success && (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm px-4 py-3 rounded-xl flex items-start gap-2">
-            <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            {success}
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm px-4 py-3 rounded-xl space-y-2">
+            <div className="flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <span>{success}</span>
+            </div>
+            {pendingEmail && (
+              <div className="bg-white border border-emerald-200 rounded-xl p-3 text-emerald-800 text-xs space-y-1 ml-6">
+                <p className="font-semibold">Pasos para activar la agencia:</p>
+                <p>1. Ve a <a href="https://console.firebase.google.com" target="_blank" className="underline font-medium">Firebase Console</a> → Authentication → Users → Add user</p>
+                <p>2. Introduce el email <strong>{pendingEmail}</strong> y una contraseña temporal cualquiera</p>
+                <p>3. Copia el UID generado y actualiza el campo <code>id</code> del documento en Firestore → agencies</p>
+                <p>4. Pulsa el botón de sobre ✉ en la tabla para enviarle el email de restablecimiento</p>
+              </div>
+            )}
           </div>
         )}
 
@@ -288,8 +259,8 @@ export default function AdminPage() {
                     </td>
                     <td className="px-5 py-4 text-gray-600">{agency.city || "—"}</td>
                     <td className="px-5 py-4">
-                      <Badge variant={agency.status === "active" ? "green" : "gray"} dot>
-                        {agency.status === "active" ? "Activa" : "Inactiva"}
+                      <Badge variant={agency.status === "active" ? "green" : agency.status === "pending" ? "yellow" : "gray"} dot>
+                        {agency.status === "active" ? "Activa" : agency.status === "pending" ? "Pendiente" : "Inactiva"}
                       </Badge>
                     </td>
                     <td className="px-4 py-4">
